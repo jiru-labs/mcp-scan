@@ -1,5 +1,6 @@
 """Typer entrypoint for the mcp-scan CLI."""
 
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
@@ -28,11 +29,31 @@ CONFIG_OPTION = typer.Option(
     help="Read this config file instead of discovering the installed hosts.",
 )
 
+QUIET_OPTION = typer.Option(
+    "--quiet",
+    "-q",
+    help="Print the summary line only, without the findings table.",
+)
+
 SEVERITY_STYLES = {
     Severity.CRITICAL: "bold red",
     Severity.WARN: "yellow",
     Severity.INFO: "blue",
 }
+
+#: What `scan` returns to the shell, so a script can act on the verdict without
+#: parsing the output. Keyed by the *worst* finding of the run.
+#:
+#: INFO returns 0 along with a clean scan: it is something worth telling the
+#: user, not something worth failing their build over. A pipeline that wants to
+#: be stricter than that can read the summary line.
+EXIT_CODES = {
+    Severity.INFO: 0,
+    Severity.WARN: 1,
+    Severity.CRITICAL: 2,
+}
+
+EXIT_CLEAN = 0
 
 
 @app.callback()
@@ -72,27 +93,41 @@ def list_servers(
 @app.command()
 def scan(
     config: Annotated[Path | None, CONFIG_OPTION] = None,
+    quiet: Annotated[bool, QUIET_OPTION] = False,
 ) -> None:
     """Scan your MCP servers for security risks.
 
     Runs every detection rule against every server found, and reports what they
     flag, worst first. Read-only: no config file is ever modified.
+
+    Exits 0 when nothing worse than an INFO finding is reported, 1 when the
+    worst is a WARN, and 2 when a CRITICAL is found — so a script can gate on
+    the verdict without reading the output. With --quiet, the summary line is
+    all it prints, and the exit code carries the rest.
     """
     locations, servers, warnings = _read_servers(config)
 
     result = run_rules(servers, load_rules())
     warnings.extend(result.warnings)
 
-    if result.findings:
+    if result.findings and not quiet:
         console.print(_findings_table(result.findings))
 
+    # A warning survives --quiet. It does not report a risk, it reports that we
+    # failed to look for one — a config we could not read, a rule that crashed —
+    # and a CI run that swallows *that* is a CI run that passes green over an
+    # unscanned config.
     _print_warnings(warnings)
 
-    if servers and not result.findings:
+    if result.findings:
+        console.print(_summary(result.findings, servers))
+    elif servers:
         console.print(f"[green]No findings in {_count(len(servers), 'server')}.[/green]")
-    elif not servers and not warnings:
+    elif not warnings:
         # Nothing was scanned, and no warning has already explained why.
         console.print(f"[yellow]{_nothing_to_report(locations)}[/yellow]")
+
+    raise typer.Exit(_exit_code(result.findings))
 
 
 def _read_servers(
@@ -145,6 +180,36 @@ def _nothing_to_report(locations: list[ConfigLocation]) -> str:
 def _count(total: int, noun: str) -> str:
     """`1 server`, `3 servers` — a count the user can read out loud."""
     return f"{total} {noun}" if total == 1 else f"{total} {noun}s"
+
+
+def _exit_code(findings: list[Finding]) -> int:
+    """What the run returns to the shell: the worst thing it found.
+
+    A clean scan and a scan that found nothing to scan both return 0. They are
+    different results, and the output says which — but neither is a risk, and
+    an exit code is not the place to argue about it.
+    """
+    if not findings:
+        return EXIT_CLEAN
+    return EXIT_CODES[max(finding.severity for finding in findings)]
+
+
+def _summary(findings: list[Finding], servers: list[MCPServer]) -> Text:
+    """One line saying what the scan found — the whole of `--quiet`'s output.
+
+    Severities are counted worst-first and named exactly as the table names
+    them, so the line reads as the table's own bottom row: `3 findings in 2
+    servers: 1 CRITICAL, 2 WARN.`
+    """
+    counts = Counter(finding.severity for finding in findings)
+    tally = ", ".join(
+        f"{counts[severity]} {severity}" for severity in sorted(counts, reverse=True)
+    )
+    return Text(
+        f"{_count(len(findings), 'finding')} in "
+        f"{_count(len(servers), 'server')}: {tally}.",
+        style=SEVERITY_STYLES[max(counts)],
+    )
 
 
 def _servers_table(servers: list[MCPServer]) -> Table:

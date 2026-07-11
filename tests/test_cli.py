@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from conftest import InstalledHosts
 from rich.console import Console
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from mcp_scan import __version__, cli
 from mcp_scan.cli import app
@@ -20,6 +20,28 @@ from mcp_scan.parsers import MCPServer
 from mcp_scan.rules import Finding, Rule, Severity
 
 runner = CliRunner()
+
+# The contract `scan` owes a CI pipeline, written out rather than imported: a
+# test that read these from the CLI would pass whatever the CLI decided to
+# return.
+EXIT_CLEAN = 0
+EXIT_WARN = 1
+EXIT_CRITICAL = 2
+
+
+def _crashed(result: Result) -> bool:
+    """True when the command died rather than exiting with a verdict.
+
+    A non-zero exit is how `scan` *reports* a finding, and Click files the
+    `SystemExit` that carried it under `result.exception`. Anything else there
+    is a real crash.
+    """
+    return result.exception is not None and not isinstance(result.exception, SystemExit)
+
+
+def _without_summary(output: str) -> str:
+    """Everything `scan` printed above its summary line, which is always last."""
+    return "\n".join(output.splitlines()[:-1])
 
 
 class FlagsEveryServer(Rule):
@@ -42,6 +64,17 @@ class FlagsRemoteServers(Rule):
 
     def check(self, server: MCPServer) -> list[Finding]:
         return [self.finding(server)] if server.url else []
+
+
+class WarnsOnEveryServer(Rule):
+    """A dummy rule whose worst word is a warning — the exit-1 case."""
+
+    id = "test-warn"
+    title = "Test rule that warns about everything"
+    severity = Severity.WARN
+
+    def check(self, server: MCPServer) -> list[Finding]:
+        return [self.finding(server, f"{server.name} is questionable")]
 
 
 class FlagsNothing(Rule):
@@ -307,7 +340,7 @@ def test_scan_shows_a_table_of_findings(
 
     result = runner.invoke(app, ["scan", "--config", str(sample_config)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_CRITICAL
     assert "Findings" in result.stdout
     assert "CRITICAL" in result.stdout
     assert "test-critical" in result.stdout
@@ -323,11 +356,13 @@ def test_scan_sorts_findings_worst_first(
 
     result = runner.invoke(app, ["scan", "--config", str(sample_config)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_CRITICAL
     # The lone INFO finding lands below every CRITICAL one, whatever order the
-    # rules ran in.
-    assert result.stdout.index("CRITICAL") < result.stdout.index("INFO")
-    assert result.stdout.rindex("CRITICAL") < result.stdout.index("INFO")
+    # rules ran in. The summary line names both severities, and sits below the
+    # lot of them: the ordering under test is the table's.
+    table = _without_summary(result.stdout)
+    assert table.index("CRITICAL") < table.index("INFO")
+    assert table.rindex("CRITICAL") < table.index("INFO")
 
 
 def test_scan_reports_a_clean_config(
@@ -337,8 +372,142 @@ def test_scan_reports_a_clean_config(
 
     result = runner.invoke(app, ["scan", "--config", str(sample_config)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_CLEAN
     assert "No findings in 3 servers." in result.stdout
+
+
+class TestExitCodes:
+    """The verdict a script reads: the worst finding of the run, and nothing else.
+
+    A pipeline gates on this without parsing a word of the output, so each code
+    is asserted as the literal number `mcp-scan` promises.
+    """
+
+    def test_a_clean_scan_exits_0(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsNothing())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_CLEAN
+
+    def test_a_warning_exits_1(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, WarnsOnEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_WARN
+
+    def test_a_critical_exits_2(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_CRITICAL
+
+    def test_the_worst_finding_decides_the_code(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        """A critical among warnings is still a critical."""
+        _pretend_rules_are(
+            monkeypatch, WarnsOnEveryServer(), FlagsRemoteServers(), FlagsEveryServer()
+        )
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_CRITICAL
+
+    def test_info_findings_alone_exit_0(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        """INFO is worth saying, not worth failing a build over."""
+        _pretend_rules_are(monkeypatch, FlagsRemoteServers())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_CLEAN
+        assert "INFO" in result.stdout
+
+    def test_a_scan_with_nothing_to_scan_exits_0(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """No config is not a risk. The output says so; the exit code does not."""
+        _pretend_only_claude_desktop_config_at(monkeypatch, tmp_path / "missing.json")
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan"])
+
+        assert result.exit_code == EXIT_CLEAN
+
+
+class TestQuiet:
+    """`--quiet`: the summary line, and whatever the run failed to look at."""
+
+    def test_prints_the_summary_instead_of_the_table(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config), "--quiet"])
+
+        assert result.exit_code == EXIT_CRITICAL
+        assert "3 findings in 3 servers: 3 CRITICAL." in result.stdout
+        # The table, and the per-finding detail only it carries, are gone.
+        assert "Findings" not in result.stdout
+        assert "was flagged" not in result.stdout
+
+    def test_counts_each_severity_worst_first(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsRemoteServers(), FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config), "-q"])
+
+        # Three servers flagged CRITICAL, the one remote server also INFO.
+        assert "4 findings in 3 servers: 3 CRITICAL, 1 INFO." in result.stdout
+
+    def test_a_clean_scan_still_says_so(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsNothing())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config), "-q"])
+
+        assert result.exit_code == EXIT_CLEAN
+        assert "No findings in 3 servers." in result.stdout
+
+    def test_a_config_that_could_not_be_read_is_still_reported(
+        self, monkeypatch: pytest.MonkeyPatch, malformed_config: Path
+    ) -> None:
+        """The one thing --quiet must not swallow.
+
+        A warning does not report a risk, it reports that we failed to look for
+        one. Silenced here, a broken config would sail through CI as a clean
+        scan — the exit code cannot say it, so the line must.
+        """
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(malformed_config), "--quiet"]
+        )
+
+        assert "malformed JSON" in result.stdout
+
+    def test_the_summary_is_printed_with_the_table_too(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        """--quiet drops the table. It does not add the summary."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert "Findings" in result.stdout
+        assert "3 findings in 3 servers: 3 CRITICAL." in result.stdout
 
 
 def test_scan_discovers_installed_hosts_when_no_config_given(
@@ -351,7 +520,7 @@ def test_scan_discovers_installed_hosts_when_no_config_given(
 
     result = runner.invoke(app, ["scan"])
 
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_CRITICAL
     # A finding for a server of every host, each naming the host it came from.
     assert "cursor-search was flagged" in result.stdout
     assert HOST_CURSOR in result.stdout
@@ -390,8 +559,8 @@ def test_scan_warns_about_a_broken_rule_and_keeps_scanning(
 
     result = runner.invoke(app, ["scan", "--config", str(sample_config)])
 
-    assert result.exit_code == 0
-    assert result.exception is None
+    assert result.exit_code == EXIT_CRITICAL
+    assert not _crashed(result)
     assert "test-broken" in result.stdout
     # The healthy rule still reported.
     assert "filesystem was flagged" in result.stdout
@@ -415,8 +584,8 @@ def test_scan_renders_a_server_name_that_looks_like_console_markup(
 
     result = runner.invoke(app, ["scan", "--config", str(markup_config)])
 
-    assert result.exit_code == 0
-    assert result.exception is None
+    assert result.exit_code == EXIT_CRITICAL
+    assert not _crashed(result)
     # The name survives into the finding the rule built from it.
     assert "evil [/bold] was flagged" in result.stdout
 
@@ -439,7 +608,7 @@ def test_scan_reports_hardcoded_credentials_without_printing_them(
     """The shipped rules, end to end: a real config in, a real report out."""
     result = runner.invoke(app, ["scan", "--config", str(credentials_config)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_CRITICAL
 
     # The credential on the command line outranks the one in the config file.
     assert result.stdout.index("CRITICAL") < result.stdout.index("WARN")
