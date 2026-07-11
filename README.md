@@ -49,6 +49,24 @@ mcp-scan scan --config path/to/claude_desktop_config.json
 
 Every detection rule runs against every server found, and the findings are reported worst-first, each naming the server, the host and the config file it came from. A rule that fails is reported as a warning; it never takes the scan down with it.
 
+### In a script, or in CI
+
+`scan` ends with a one-line summary — `3 findings in 2 servers: 1 CRITICAL, 2 WARN.` — and returns the worst thing it found:
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Nothing worse than an `INFO` finding. An `INFO` is worth telling you about, not worth failing your build over. |
+| `1` | The worst finding is a `WARN`. |
+| `2` | A `CRITICAL` was found. |
+
+So a pipeline can gate on the verdict without reading a word of the output:
+
+```bash
+mcp-scan scan --quiet || echo "MCP config needs attention"
+```
+
+`--quiet` (`-q`) drops the findings table and prints the summary line alone. It does *not* silence warnings — a config that could not be parsed, or a rule that crashed, still says so. A warning is not a risk it found; it is a risk it failed to look for, and that is the last thing a CI run should swallow.
+
 ### What it detects
 
 | Rule | Severity | What it flags |
