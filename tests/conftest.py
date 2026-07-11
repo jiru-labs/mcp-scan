@@ -113,11 +113,12 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
         # tests. `appdata` is pinned under `home`, not left at its real
         # `%APPDATA%` default, so that on an actual Windows machine this still
         # lands inside tmp_path instead of a real Claude Desktop config
-        # directory. `cli.py` itself calls `find_all_configs()` with no
-        # `appdata` override, so on Windows the CLI-level tests below still
-        # resolve against the real `%APPDATA%`, not this fixture — hermetic
-        # end-to-end coverage there would need `os.environ` monkeypatching
-        # too, which is out of scope while there is no Windows test runner.
+        # directory. Any test that calls `find_all_configs()` or the CLI
+        # without also overriding `appdata` (all of them, below) still
+        # resolves the desktop config against the real `%APPDATA%` on
+        # Windows, not this fixture — hermetic coverage there would need
+        # `os.environ` monkeypatching too, out of scope while there is no
+        # Windows test runner.
         claude_desktop_config_path(
             home, appdata=str(home / "AppData" / "Roaming")
         ): "sample_config.json",
