@@ -16,11 +16,21 @@ pipx install mcp-scan
 
 ## Usage
 
-List the MCP servers declared in the host configs found on your machine:
+List the MCP servers declared in the host configs found on your machine, grouped by the host that declares them:
 
 ```bash
 mcp-scan list
 ```
+
+These are the files it looks for:
+
+| Host | Config |
+| --- | --- |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Code | `~/.claude.json`, and `.mcp.json` in the current directory |
+| Cursor | `~/.cursor/mcp.json` |
+
+A host you don't have installed is simply skipped, not an error.
 
 Environment variables are listed by name only — `mcp-scan` never reads, prints or stores their values.
 

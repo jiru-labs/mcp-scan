@@ -2,22 +2,33 @@
 
 from pathlib import Path
 
+import pytest
+from conftest import InstalledHosts
+
 from mcp_scan.discovery import (
+    CLAUDE_CODE_CONFIG_RELPATH,
+    CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
     CLAUDE_DESKTOP_CONFIG_RELPATH,
+    CURSOR_CONFIG_RELPATH,
+    HOST_CLAUDE_CODE,
     HOST_CLAUDE_DESKTOP,
+    HOST_CURSOR,
+    ConfigLocation,
+    find_all_configs,
+    find_claude_code_configs,
     find_claude_desktop_config,
+    find_cursor_config,
 )
 
 
-def _write_claude_desktop_config(home: Path) -> Path:
-    path = home / CLAUDE_DESKTOP_CONFIG_RELPATH
+def _write_config(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{}", encoding="utf-8")
     return path
 
 
-def test_finds_existing_config(tmp_path: Path) -> None:
-    expected = _write_claude_desktop_config(tmp_path)
+def test_finds_existing_claude_desktop_config(tmp_path: Path) -> None:
+    expected = _write_config(tmp_path / CLAUDE_DESKTOP_CONFIG_RELPATH)
 
     location = find_claude_desktop_config(home=tmp_path)
 
@@ -44,7 +55,7 @@ def test_path_pointing_at_a_directory_is_not_a_config(tmp_path: Path) -> None:
 
 
 def test_unreadable_parent_directory_does_not_raise(tmp_path: Path) -> None:
-    _write_claude_desktop_config(tmp_path)
+    _write_config(tmp_path / CLAUDE_DESKTOP_CONFIG_RELPATH)
     locked = tmp_path / "Library" / "Application Support" / "Claude"
     locked.chmod(0o000)
 
@@ -60,3 +71,77 @@ def test_defaults_to_real_home_when_no_home_given() -> None:
 
     assert location.path == Path.home() / CLAUDE_DESKTOP_CONFIG_RELPATH
     assert isinstance(location.exists, bool)
+
+
+def test_finds_both_claude_code_configs(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    user_config = _write_config(home / CLAUDE_CODE_CONFIG_RELPATH)
+    project_config = _write_config(project / CLAUDE_CODE_PROJECT_CONFIG_FILENAME)
+
+    locations = find_claude_code_configs(home=home, project_dir=project)
+
+    assert [location.path for location in locations] == [user_config, project_config]
+    assert all(location.host == HOST_CLAUDE_CODE for location in locations)
+    assert all(location.exists for location in locations)
+
+
+def test_claude_code_project_config_is_reported_when_absent(tmp_path: Path) -> None:
+    # Most directories are not MCP projects; that is not an error.
+    _, project = find_claude_code_configs(home=tmp_path, project_dir=tmp_path)
+
+    assert project.path == tmp_path / CLAUDE_CODE_PROJECT_CONFIG_FILENAME
+    assert project.exists is False
+
+
+def test_claude_code_project_config_defaults_to_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    expected = _write_config(tmp_path / CLAUDE_CODE_PROJECT_CONFIG_FILENAME)
+
+    _, project = find_claude_code_configs(home=tmp_path)
+
+    assert project.path == expected
+    assert project.exists is True
+
+
+def test_finds_existing_cursor_config(tmp_path: Path) -> None:
+    expected = _write_config(tmp_path / CURSOR_CONFIG_RELPATH)
+
+    location = find_cursor_config(home=tmp_path)
+
+    assert location.host == HOST_CURSOR
+    assert location.path == expected
+    assert location.exists is True
+
+
+def test_missing_cursor_config_does_not_raise(tmp_path: Path) -> None:
+    location = find_cursor_config(home=tmp_path)
+
+    assert location.host == HOST_CURSOR
+    assert location.exists is False
+
+
+def test_find_all_configs_covers_every_host(installed_hosts: InstalledHosts) -> None:
+    locations = find_all_configs(
+        home=installed_hosts.home, project_dir=installed_hosts.project_dir
+    )
+
+    assert [location.host for location in locations] == [
+        HOST_CLAUDE_DESKTOP,
+        HOST_CLAUDE_CODE,
+        HOST_CLAUDE_CODE,
+        HOST_CURSOR,
+    ]
+    assert all(location.exists for location in locations)
+
+
+def test_find_all_configs_reports_uninstalled_hosts(tmp_path: Path) -> None:
+    # Nothing installed: every host still gets a candidate, all absent, so a
+    # caller can tell "not installed" from "installed but empty".
+    locations = find_all_configs(home=tmp_path, project_dir=tmp_path)
+
+    assert len(locations) == 4
+    assert not any(location.exists for location in locations)
+    assert all(isinstance(location, ConfigLocation) for location in locations)

@@ -3,6 +3,16 @@
 import json
 from pathlib import Path
 
+from conftest import InstalledHosts
+
+from mcp_scan.discovery import (
+    CLAUDE_CODE_CONFIG_RELPATH,
+    CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
+    CURSOR_CONFIG_RELPATH,
+    HOST_CLAUDE_CODE,
+    HOST_CURSOR,
+    HOST_UNKNOWN,
+)
 from mcp_scan.parsers import (
     TRANSPORT_REMOTE,
     TRANSPORT_STDIO,
@@ -134,6 +144,79 @@ def test_a_broken_server_entry_does_not_discard_its_siblings(tmp_path: Path) -> 
 
     assert [server.name for server in result.servers] == ["ok"]
     assert "server 'broken' is not a JSON object" in result.warnings[0]
+
+
+def test_servers_are_stamped_with_the_host_they_came_from(
+    sample_config: Path,
+) -> None:
+    result = parse_config_file(sample_config, host=HOST_CURSOR)
+
+    assert result.servers
+    assert all(server.host == HOST_CURSOR for server in result.servers)
+
+
+def test_host_is_unknown_when_the_caller_does_not_name_one(
+    sample_config: Path,
+) -> None:
+    # `--config some/file.json`: we know the file, not the tool that owns it.
+    result = parse_config_file(sample_config)
+
+    assert all(server.host == HOST_UNKNOWN for server in result.servers)
+
+
+def test_parses_the_claude_code_user_config(installed_hosts: InstalledHosts) -> None:
+    path = installed_hosts.home / CLAUDE_CODE_CONFIG_RELPATH
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+    server = next(s for s in result.servers if s.name == "linear")
+
+    # `~/.claude.json` carries unrelated top-level keys; they are not our
+    # business and must not produce warnings.
+    assert result.warnings == []
+    assert server.host == HOST_CLAUDE_CODE
+    assert server.transport == TRANSPORT_STDIO
+    assert server.env_keys == ("LINEAR_API_KEY",)
+
+
+def test_parses_the_claude_code_project_config(
+    installed_hosts: InstalledHosts,
+) -> None:
+    path = installed_hosts.project_dir / CLAUDE_CODE_PROJECT_CONFIG_FILENAME
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+    server = next(s for s in result.servers if s.name == "project-db")
+
+    assert result.warnings == []
+    assert server.host == HOST_CLAUDE_CODE
+    assert server.command == "uvx"
+    assert server.env_keys == ("DATABASE_URL",)
+
+
+def test_parses_the_cursor_config(installed_hosts: InstalledHosts) -> None:
+    path = installed_hosts.home / CURSOR_CONFIG_RELPATH
+
+    result = parse_config_file(path, host=HOST_CURSOR)
+    server = next(s for s in result.servers if s.name == "cursor-search")
+
+    assert result.warnings == []
+    assert server.host == HOST_CURSOR
+    assert server.transport == TRANSPORT_REMOTE
+    assert server.url == "https://search.example.com/mcp"
+
+
+def test_no_host_config_leaks_a_credential(installed_hosts: InstalledHosts) -> None:
+    results = [
+        parse_config_file(installed_hosts.home / CLAUDE_CODE_CONFIG_RELPATH),
+        parse_config_file(
+            installed_hosts.project_dir / CLAUDE_CODE_PROJECT_CONFIG_FILENAME
+        ),
+        parse_config_file(installed_hosts.home / CURSOR_CONFIG_RELPATH),
+    ]
+
+    parsed = repr(results)
+    assert installed_hosts.secrets  # the fixtures must actually carry secrets
+    for secret in installed_hosts.secrets:
+        assert secret not in parsed
 
 
 def test_fields_of_an_unexpected_type_are_dropped(tmp_path: Path) -> None:

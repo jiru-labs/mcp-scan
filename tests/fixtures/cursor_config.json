@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "cursor-search": {
+      "url": "https://search.example.com/mcp",
+      "env": {
+        "SEARCH_API_KEY": "sk-FAKEfixtureSEARCHKEYdoNotUse"
+      }
+    }
+  }
+}

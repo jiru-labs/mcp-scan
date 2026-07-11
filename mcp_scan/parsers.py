@@ -17,6 +17,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mcp_scan.discovery import HOST_UNKNOWN
+
 SERVERS_KEY = "mcpServers"
 
 TRANSPORT_STDIO = "stdio"
@@ -28,12 +30,14 @@ TRANSPORT_UNKNOWN = "unknown"
 class MCPServer:
     """A single MCP server as declared in a host config.
 
-    `env_keys` holds the names of the declared environment variables, never
-    their values.
+    `host` is the tool that owns the config the server was read from, and
+    `source` the config file itself. `env_keys` holds the names of the declared
+    environment variables, never their values.
     """
 
     name: str
     source: Path
+    host: str = HOST_UNKNOWN
     command: str | None = None
     args: tuple[str, ...] = ()
     url: str | None = None
@@ -68,10 +72,16 @@ class ParseResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def parse_config_file(path: Path) -> ParseResult:
+def parse_config_file(path: Path, host: str = HOST_UNKNOWN) -> ParseResult:
     """Read a host config file and extract its MCP servers.
 
     Never raises: unreadable or malformed input is reported as a warning.
+
+    Args:
+        path: The config file to read.
+        host: The tool that owns the config, stamped on every server found in
+            it. Defaults to `HOST_UNKNOWN`, for a file the caller pointed us at
+            without saying who it belongs to.
     """
     result = ParseResult()
 
@@ -111,12 +121,12 @@ def parse_config_file(path: Path) -> ParseResult:
                 f"{path}: server '{name}' is not a JSON object, skipped"
             )
             continue
-        result.servers.append(_build_server(name, definition, path))
+        result.servers.append(_build_server(name, definition, path, host))
 
     return result
 
 
-def _build_server(name: str, definition: dict, source: Path) -> MCPServer:
+def _build_server(name: str, definition: dict, source: Path, host: str) -> MCPServer:
     """Build an MCPServer from one `mcpServers` entry.
 
     Fields of an unexpected type are dropped rather than rejected: a partially
@@ -142,6 +152,7 @@ def _build_server(name: str, definition: dict, source: Path) -> MCPServer:
     return MCPServer(
         name=name,
         source=source,
+        host=host,
         command=command,
         args=args,
         url=url,

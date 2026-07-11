@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from mcp_scan import __version__
-from mcp_scan.discovery import ConfigLocation, find_claude_desktop_config
+from mcp_scan.discovery import HOST_UNKNOWN, ConfigLocation, find_all_configs
 from mcp_scan.parsers import MCPServer, parse_config_file
 
 app = typer.Typer(
@@ -45,15 +45,19 @@ def list_servers(
 ) -> None:
     """List the MCP servers declared in your local host configs.
 
-    Environment variables are reported by name only; their values are never
-    read into the report.
+    Servers are grouped by the host that declares them. Environment variables
+    are reported by name only; their values are never read into the report.
     """
-    paths = [config] if config is not None else _discovered_config_paths()
+    locations = (
+        [ConfigLocation(host=HOST_UNKNOWN, path=config, exists=True)]
+        if config is not None
+        else _installed_host_configs()
+    )
 
     servers: list[MCPServer] = []
     warnings: list[str] = []
-    for path in paths:
-        result = parse_config_file(path)
+    for location in locations:
+        result = parse_config_file(location.path, host=location.host)
         servers.extend(result.servers)
         warnings.extend(result.warnings)
 
@@ -68,33 +72,54 @@ def list_servers(
     if not servers and not warnings:
         message = (
             "No MCP servers declared in any config file."
-            if paths
+            if locations
             else "No MCP config files found."
         )
         console.print(f"[yellow]{message}[/yellow]")
 
 
-def _discovered_config_paths() -> list[Path]:
-    """Paths of the config files that actually exist on this machine."""
-    locations: list[ConfigLocation] = [find_claude_desktop_config()]
-    return [location.path for location in locations if location.exists]
+def _installed_host_configs() -> list[ConfigLocation]:
+    """The host configs that actually exist on this machine."""
+    return [location for location in find_all_configs() if location.exists]
 
 
 def _servers_table(servers: list[MCPServer]) -> Table:
     table = Table(title="MCP servers")
+    table.add_column("Host", style="cyan")
     table.add_column("Server", style="bold")
     table.add_column("Transport")
     table.add_column("Command / URL", overflow="fold")
     table.add_column("Env keys", overflow="fold")
     table.add_column("Source", overflow="fold", style="dim")
 
-    for server in servers:
-        table.add_row(
-            server.name,
-            server.transport,
-            server.endpoint or "-",
-            ", ".join(server.env_keys) or "-",
-            str(server.source),
-        )
+    for index, (host, group) in enumerate(_group_by_host(servers).items()):
+        if index:
+            table.add_section()
+        for position, server in enumerate(group):
+            table.add_row(
+                # The host labels its group once, on the first of its servers.
+                host if position == 0 else "",
+                server.name,
+                server.transport,
+                server.endpoint or "-",
+                ", ".join(server.env_keys) or "-",
+                _display_path(server.source),
+            )
 
     return table
+
+
+def _group_by_host(servers: list[MCPServer]) -> dict[str, list[MCPServer]]:
+    """Servers bucketed by host, hosts in the order they were discovered."""
+    groups: dict[str, list[MCPServer]] = {}
+    for server in servers:
+        groups.setdefault(server.host, []).append(server)
+    return groups
+
+
+def _display_path(path: Path) -> str:
+    """Abbreviate a path under the user's home to `~/...`, to keep rows narrow."""
+    home = Path.home()
+    if path.is_relative_to(home):
+        return str(Path("~") / path.relative_to(home))
+    return str(path)
