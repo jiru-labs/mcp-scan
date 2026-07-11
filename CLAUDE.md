@@ -11,13 +11,15 @@ Philosophy: local-first, read-only by default, zero telemetry, clear and actiona
 ## Status and roadmap
 
 - Done: reading and listing configs (issues #1–#5), across every host scope
-  including local/project scopes (issues #14, #31); risk detection
-  (issues #6–#9); credential redaction (issues #16, #22); exportable
-  report (issue #10, #19); exit-code hardening for CI (issues #9, #23, #27).
-- All issues filed so far (#1–#31) are closed; no open issues or PRs as of
-  2026-07-11.
-- Next: see the open issues, or propose new ones per the project thesis
-  below (e.g. more MCP hosts, CI-friendly output formats).
+  including local/project scopes (issues #14, #31) and VS Code and Windsurf
+  (issue #38); risk detection (issues #6–#9); credential redaction
+  (issues #16, #22); exportable report (issues #10, #19) in markdown, JSON and
+  SARIF (issue #34); exit-code hardening for CI (issues #9, #23, #27).
+- Open issues drift out of this list faster than it gets rewritten: run
+  `gh issue list` rather than trusting the paragraph above. Open as of
+  2026-07-11: #35, #36, #37, #39.
+- Next: pick one of those, or propose new ones per the project thesis below
+  (e.g. more MCP hosts, more detection rules).
 
 ## Tech stack
 
