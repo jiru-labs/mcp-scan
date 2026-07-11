@@ -34,6 +34,11 @@ class Finding:
 
     Carries the server it fired on, so the report can name the server, its host
     and the config file it was declared in without a second lookup.
+
+    `message` is what is wrong with *this* server — which variable, which
+    argument, which path. `remediation` is how to fix that class of problem, and
+    is the same for every finding a given rule makes; a report groups by it to
+    tell the user what to actually go and do.
     """
 
     rule_id: str
@@ -41,6 +46,7 @@ class Finding:
     severity: Severity
     server: MCPServer
     message: str
+    remediation: str = ""
 
 
 class Rule(ABC):
@@ -57,6 +63,12 @@ class Rule(ABC):
     title: ClassVar[str] = ""
     #: Severity of the findings this rule produces.
     severity: ClassVar[Severity] = Severity.INFO
+    #: How to fix what this rule finds, addressed to the user and phrased as an
+    #: instruction. Every shipped rule defines one — a finding the user cannot
+    #: act on is a finding that wastes their afternoon — and `test_rules` holds
+    #: the package to that. It defaults to empty only so that a throwaway rule
+    #: in a test need not write a paragraph of advice about nothing.
+    remediation: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Reject a rule that would report itself as a blank row."""
@@ -87,4 +99,5 @@ class Rule(ABC):
             severity=self.severity,
             server=server,
             message=message if message is not None else self.title,
+            remediation=self.remediation,
         )

@@ -122,6 +122,15 @@ class BroadFilesystemAccess(Rule):
     id = "broad-filesystem-access"
     title = "Server granted access to a whole filesystem, home or disk"
     severity = Severity.WARN
+    remediation = (
+        "Grant the directories the server actually works in, one by one "
+        "(`~/code/my-app`), instead of a home directory or a whole disk. The scope "
+        "you hand it is the scope an attacker gets: everything the agent can be "
+        "talked into reading, it can be talked into sending somewhere — and a home "
+        "directory holds your SSH keys, your browser profile, your `.env` files "
+        "and every other config on this list. Narrow it, and a prompt injection "
+        "has far less to take."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         findings = []
@@ -147,6 +156,15 @@ class UnrestrictedShellAccess(Rule):
     id = "unrestricted-shell-access"
     title = "Server gives the agent an unrestricted shell"
     severity = Severity.WARN
+    remediation = (
+        "Replace it with a server scoped to the job you needed it for — git, "
+        "filesystem, a database client — or restrict it to an allow-list of the "
+        "commands you actually run. Keep it only if you have decided, knowingly, "
+        "that you want it: a shell server executes whatever the agent composes, "
+        "with your privileges, so any prompt injection the agent reads — from a "
+        "web page, a file, another tool's output — is code execution on your "
+        "machine, and no other rule in this report can help you once it is."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         return [

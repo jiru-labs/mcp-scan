@@ -1,17 +1,16 @@
 """Typer entrypoint for the mcp-scan CLI."""
 
-from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.text import Text
 
-from mcp_scan import __version__
+from mcp_scan import __version__, report
 from mcp_scan.discovery import HOST_UNKNOWN, ConfigLocation, find_all_configs
 from mcp_scan.parsers import MCPServer, parse_config_file
+from mcp_scan.report import Report, SEVERITY_STYLES
 from mcp_scan.rules import Finding, Severity, load_rules, run_rules
 
 app = typer.Typer(
@@ -27,19 +26,28 @@ CONFIG_OPTION = typer.Option(
     "--config",
     "-c",
     help="Read this config file instead of discovering the installed hosts.",
+    # Click checks a path for readability before the command ever runs, and
+    # fails with a usage error when the check fails. That is the wrong answer
+    # for a config we lack permission to open: it is not a mistake in how the
+    # user invoked us, it is a config we could not scan, and we report it as
+    # the warning it is. The parser opens the file and handles the refusal.
+    readable=False,
 )
 
 QUIET_OPTION = typer.Option(
     "--quiet",
     "-q",
-    help="Print the summary line only, without the findings table.",
+    help="Print the summary line only, without the findings.",
 )
 
-SEVERITY_STYLES = {
-    Severity.CRITICAL: "bold red",
-    Severity.WARN: "yellow",
-    Severity.INFO: "blue",
-}
+OUTPUT_OPTION = typer.Option(
+    "--output",
+    "-o",
+    help=(
+        "Also write the report to this file. The extension picks the format: "
+        ".md for markdown, .json for JSON."
+    ),
+)
 
 #: What `scan` returns to the shell, so a script can act on the verdict without
 #: parsing the output. Keyed by the *worst* finding of the run.
@@ -54,6 +62,46 @@ EXIT_CODES = {
 }
 
 EXIT_CLEAN = 0
+
+#: A usage error: an unknown flag, a missing option value, a command that does
+#: not exist. The number is `EX_USAGE` from `sysexits.h`, the convention for
+#: exactly this, and — the point of the exercise — it is not one of the verdict
+#: codes above.
+#:
+#: Click exits `2` for a usage error, which is our CRITICAL. A pipeline gating on
+#: the verdict would read a typo in a flag as "a critical risk was found", which
+#: is a different untrue thing from the one #23 fixed but untrue all the same.
+#: Click decides a usage error's exit code from `UsageError.exit_code`, a class
+#: attribute shared by every usage error it raises, so moving that one number
+#: moves all of them — and it moves them for the real CLI and the test runner
+#: alike, since both reach the shell through the same Click machinery.
+EXIT_USAGE = 64
+
+# Typer vendors its own Click on newer releases and depends on the standalone
+# package on older ones; `typer>=0.12` spans both. Reach the UsageError class
+# from wherever this install keeps it, and retune its exit code.
+try:
+    from click.exceptions import UsageError as _UsageError
+except ModuleNotFoundError:  # pragma: no cover — one branch runs per install
+    from typer._click.exceptions import UsageError as _UsageError
+
+_UsageError.exit_code = EXIT_USAGE
+
+#: The run did not complete: a config could not be read, a rule crashed, or the
+#: report the user asked for could not be written.
+#:
+#: Distinct from the codes above, and it outranks every one of them. They are
+#: verdicts — each says "I checked everything, and the worst of it was X" — and
+#: a run that failed to look at part of the config cannot honestly say that, at
+#: any severity. 0 would be the dangerous version of the lie (a build passes
+#: green over a config nobody read), but 1 and 2 are the same claim of complete
+#: coverage, and are just as untrue.
+#:
+#: So this code says the one thing that is true: the verdict is unknown, go and
+#: look. Nothing is hidden by it — every finding the scan did manage to make is
+#: still reported in full — but the single integer says "I don't know" rather
+#: than overstating what the run actually managed to check.
+EXIT_INCOMPLETE = 3
 
 
 @app.callback()
@@ -80,7 +128,7 @@ def list_servers(
     locations, servers, warnings = _read_servers(config)
 
     if servers:
-        console.print(_servers_table(servers))
+        console.print(report.servers_table(servers))
 
     _print_warnings(warnings)
 
@@ -94,6 +142,7 @@ def list_servers(
 def scan(
     config: Annotated[Path | None, CONFIG_OPTION] = None,
     quiet: Annotated[bool, QUIET_OPTION] = False,
+    output: Annotated[Path | None, OUTPUT_OPTION] = None,
 ) -> None:
     """Scan your MCP servers for security risks.
 
@@ -102,16 +151,32 @@ def scan(
 
     Exits 0 when nothing worse than an INFO finding is reported, 1 when the
     worst is a WARN, and 2 when a CRITICAL is found — so a script can gate on
-    the verdict without reading the output. With --quiet, the summary line is
-    all it prints, and the exit code carries the rest.
+    the verdict without reading the output. A run that could not complete,
+    because a config would not parse, a rule crashed, or --output could not be
+    written, exits 3 rather than passing off a partial look as a verdict.
+
+    With --output, the same report is written to a file as markdown or JSON,
+    for sharing or for whatever consumes the scan next. With --quiet, the
+    summary line is all it prints, and the exit code carries the rest.
     """
     locations, servers, warnings = _read_servers(config)
 
     result = run_rules(servers, load_rules())
     warnings.extend(result.warnings)
 
-    if result.findings and not quiet:
-        console.print(_findings_table(result.findings))
+    scanned = Report(
+        servers=servers,
+        findings=result.findings,
+        warnings=warnings,
+        exit_code=_exit_code(result.findings, warnings),
+        # Every file we tried to read, so --output can refuse to write over one
+        # even when it parsed to no servers at all.
+        sources=[location.path for location in locations],
+    )
+
+    if scanned.findings and not quiet:
+        console.print(report.terminal(scanned))
+        console.print()
 
     # A warning survives --quiet. It does not report a risk, it reports that we
     # failed to look for one — a config we could not read, a rule that crashed —
@@ -119,15 +184,53 @@ def scan(
     # unscanned config.
     _print_warnings(warnings)
 
-    if result.findings:
-        console.print(_summary(result.findings, servers))
+    if scanned.findings:
+        console.print(Text(report.summary(scanned), style=SEVERITY_STYLES[max(scanned.counts)]))
     elif servers:
-        console.print(f"[green]No findings in {_count(len(servers), 'server')}.[/green]")
+        console.print(Text(report.summary(scanned), style="green"))
     elif not warnings:
         # Nothing was scanned, and no warning has already explained why.
         console.print(f"[yellow]{_nothing_to_report(locations)}[/yellow]")
 
-    raise typer.Exit(_exit_code(result.findings))
+    if warnings:
+        # Said out loud, because the summary line above it cannot say it. That
+        # line counts what the rules found, and a scan that skipped half the
+        # config still reports "no findings" — true of what it read, and
+        # worthless as a verdict. This is the sentence that stops a user reading
+        # green where there is only silence.
+        console.print(_incomplete(warnings))
+
+    if output is not None and not _written(scanned, output):
+        # Asked for a report and given none, a pipeline must not carry on as if
+        # it had one — least of all one about to read a stale file from the last
+        # run. Whatever the findings were, this run did not deliver.
+        raise typer.Exit(EXIT_INCOMPLETE)
+
+    raise typer.Exit(scanned.exit_code)
+
+
+def _written(scanned: Report, output: Path) -> bool:
+    """Write the report to `output`, saying whether it got there.
+
+    Every way this fails is the user's to fix — a format we do not write, a path
+    that is one of their configs, a directory that does not exist — so each one
+    is reported as itself rather than as a traceback.
+    """
+    try:
+        report.write(scanned, output)
+    except (report.UnknownFormat, report.WouldOverwriteConfig) as exc:
+        console.print(Text.assemble(("error: ", "bold red"), Text(str(exc))))
+        return False
+    except OSError as exc:
+        console.print(
+            Text.assemble(
+                ("error: ", "bold red"), Text(f"could not write '{output}': {exc}")
+            )
+        )
+        return False
+
+    console.print(f"[dim]Report written to {_quoted(str(output))}[/dim]")
+    return True
 
 
 def _read_servers(
@@ -177,112 +280,28 @@ def _nothing_to_report(locations: list[ConfigLocation]) -> str:
     return "No MCP servers declared in any config file."
 
 
-def _count(total: int, noun: str) -> str:
-    """`1 server`, `3 servers` — a count the user can read out loud."""
-    return f"{total} {noun}" if total == 1 else f"{total} {noun}s"
-
-
-def _exit_code(findings: list[Finding]) -> int:
+def _exit_code(findings: list[Finding], warnings: list[str]) -> int:
     """What the run returns to the shell: the worst thing it found.
+
+    A warning outranks every finding, because it is not a statement about the
+    config — it is a statement about the scan, and it says the scan is not
+    trustworthy. See `EXIT_INCOMPLETE`.
 
     A clean scan and a scan that found nothing to scan both return 0. They are
     different results, and the output says which — but neither is a risk, and
     an exit code is not the place to argue about it.
     """
+    if warnings:
+        return EXIT_INCOMPLETE
     if not findings:
         return EXIT_CLEAN
     return EXIT_CODES[max(finding.severity for finding in findings)]
 
 
-def _summary(findings: list[Finding], servers: list[MCPServer]) -> Text:
-    """One line saying what the scan found — the whole of `--quiet`'s output.
-
-    Severities are counted worst-first and named exactly as the table names
-    them, so the line reads as the table's own bottom row: `3 findings in 2
-    servers: 1 CRITICAL, 2 WARN.`
-    """
-    counts = Counter(finding.severity for finding in findings)
-    tally = ", ".join(
-        f"{counts[severity]} {severity}" for severity in sorted(counts, reverse=True)
-    )
+def _incomplete(warnings: list[str]) -> Text:
+    """The line that says the run above it is not a verdict."""
     return Text(
-        f"{_count(len(findings), 'finding')} in "
-        f"{_count(len(servers), 'server')}: {tally}.",
-        style=SEVERITY_STYLES[max(counts)],
+        f"Scan incomplete: {report.count(len(warnings), 'warning')} above. "
+        f"Part of your configuration was not checked.",
+        style="yellow",
     )
-
-
-def _servers_table(servers: list[MCPServer]) -> Table:
-    table = Table(title="MCP servers")
-    table.add_column("Host", style="cyan")
-    table.add_column("Server", style="bold")
-    table.add_column("Transport")
-    table.add_column("Command / URL", overflow="fold")
-    table.add_column("Env keys", overflow="fold")
-    table.add_column("Source", overflow="fold", style="dim")
-
-    for index, (host, group) in enumerate(_group_by_host(servers).items()):
-        if index:
-            table.add_section()
-        for position, server in enumerate(group):
-            table.add_row(
-                # The host labels its group once, on the first of its servers.
-                host if position == 0 else "",
-                _quoted(server.name),
-                server.transport,
-                _quoted(server.redacted_endpoint or "-"),
-                _quoted(", ".join(server.env_keys) or "-"),
-                _quoted(_display_path(server.source)),
-            )
-
-    return table
-
-
-def _findings_table(findings: list[Finding]) -> Table:
-    """Render findings worst-first, one horizontal rule between severities."""
-    table = Table(title="Findings")
-    table.add_column("Severity")
-    table.add_column("Rule", style="bold")
-    table.add_column("Server")
-    table.add_column("Host", style="cyan")
-    table.add_column("Finding", overflow="fold")
-    table.add_column("Source", overflow="fold", style="dim")
-
-    previous: Severity | None = None
-    for finding in findings:
-        if previous is not None and finding.severity != previous:
-            table.add_section()
-        previous = finding.severity
-
-        table.add_row(
-            _severity_label(finding.severity),
-            finding.rule_id,
-            _quoted(finding.server.name),
-            finding.server.host,
-            # A rule's message quotes the server it fired on, so it is no more
-            # trustworthy than the config the server came from.
-            _quoted(finding.message),
-            _quoted(_display_path(finding.server.source)),
-        )
-
-    return table
-
-
-def _severity_label(severity: Severity) -> Text:
-    return Text(str(severity), style=SEVERITY_STYLES[severity])
-
-
-def _group_by_host(servers: list[MCPServer]) -> dict[str, list[MCPServer]]:
-    """Servers bucketed by host, hosts in the order they were discovered."""
-    groups: dict[str, list[MCPServer]] = {}
-    for server in servers:
-        groups.setdefault(server.host, []).append(server)
-    return groups
-
-
-def _display_path(path: Path) -> str:
-    """Abbreviate a path under the user's home to `~/...`, to keep rows narrow."""
-    home = Path.home()
-    if path.is_relative_to(home):
-        return str(Path("~") / path.relative_to(home))
-    return str(path)

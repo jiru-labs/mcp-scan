@@ -126,6 +126,25 @@ class TestInsecureTransport:
         assert len(findings) == 1
         assert "http://mcp.example.com/sse" in findings[0].message
 
+    def test_the_message_masks_a_credential_the_plaintext_url_carries(self) -> None:
+        """The finding is printed and written to disk, so it cannot echo a secret.
+
+        A plaintext URL is precisely where a credential is most exposed, and the
+        message names the URL so the user can find the server — but a password in
+        `user:password@` or a token in a query parameter is masked out of it, the
+        same as every other endpoint the tool shows.
+        """
+        secret_password = "hunter2SuperSecret"
+        secret_token = f"sk-{'z' * 24}"
+        url = f"http://admin:{secret_password}@mcp.example.com/sse?api_key={secret_token}"
+
+        message = InsecureTransport().check(_server(url=url))[0].message
+
+        assert secret_password not in message
+        assert secret_token not in message
+        # The server is still identifiable: scheme, host and the masks remain.
+        assert "http://admin:***@mcp.example.com/sse?api_key=***" in message
+
     def test_reports_one_url_once_however_many_times_it_appears(self) -> None:
         server = _server(
             url="http://mcp.example.com/sse",
