@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-scan"
+version = "0.1.0"
+description = "Security scanner for local MCP (Model Context Protocol) configurations"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "nyakojiru", email = "llorens.p@proton.me" }]
+keywords = ["mcp", "security", "scanner", "claude", "cursor"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security",
+]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jiru-labs/mcp-scan"
+Issues = "https://github.com/jiru-labs/mcp-scan/issues"
+
+[project.scripts]
+mcp-scan = "mcp_scan.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcp_scan"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
