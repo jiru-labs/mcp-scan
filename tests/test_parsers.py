@@ -57,6 +57,27 @@ def test_parses_a_local_server(sample_config: Path) -> None:
     )
 
 
+def test_the_redacted_endpoint_masks_a_credential_the_raw_one_carries(
+    credentials_config: Path,
+) -> None:
+    """Both endpoints exist for a reason: rules read one, reports print the other."""
+    result = parse_config_file(credentials_config)
+    server = next(s for s in result.servers if s.name == "args-inline")
+
+    assert server.redacted_endpoint == (
+        "npx -y @example/mcp-remote --api-key=*** --verbose"
+    )
+    # The rules still get the command line as it was written.
+    assert "--api-key=ghp_" in server.endpoint
+
+
+def test_a_remote_server_has_its_url_for_an_endpoint(sample_config: Path) -> None:
+    result = parse_config_file(sample_config)
+    server = next(s for s in result.servers if s.name == "remote-notes")
+
+    assert server.redacted_endpoint == server.endpoint == server.url
+
+
 def test_parses_a_remote_server(sample_config: Path) -> None:
     result = parse_config_file(sample_config)
     server = next(s for s in result.servers if s.name == "remote-notes")

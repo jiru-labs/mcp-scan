@@ -264,6 +264,42 @@ def test_list_never_prints_a_credential_from_any_host(
     assert "DATABASE_URL" in result.stdout
 
 
+def test_list_masks_a_credential_passed_inline_in_the_command_args(
+    credentials_config: Path, credentials_secrets: list[str]
+) -> None:
+    """The command line is what `list` is for — but not the secret in it."""
+    result = runner.invoke(app, ["list", "--config", str(credentials_config)])
+
+    assert result.exit_code == 0
+
+    assert credentials_secrets  # the fixture must actually carry secrets to test
+    for secret in credentials_secrets:
+        assert secret not in result.stdout
+
+    # Masked in place: the flag names what to go and fix, and the rest of the
+    # command line is still there to recognise the server by.
+    assert "--api-key=***" in result.stdout
+    assert "@example/mcp-remote" in result.stdout
+    assert "--verbose" in result.stdout
+
+
+def test_list_leaves_a_credential_referenced_from_the_environment_readable(
+    tmp_path: Path,
+) -> None:
+    """`${API_KEY}` is the fix. Masking it would hide the good news."""
+    config = tmp_path / "referenced.json"
+    config.write_text(
+        '{"mcpServers": {"clean": {"command": "npx",'
+        ' "args": ["server", "--api-key=${API_KEY}"]}}}',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["list", "--config", str(config)])
+
+    assert result.exit_code == 0
+    assert "--api-key=${API_KEY}" in result.stdout
+
+
 def test_scan_shows_a_table_of_findings(
     monkeypatch: pytest.MonkeyPatch, sample_config: Path
 ) -> None:

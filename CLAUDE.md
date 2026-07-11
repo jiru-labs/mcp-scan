@@ -31,6 +31,7 @@ mcp_scan/
   cli.py          # Typer entrypoint
   discovery.py    # locate MCP config files per host
   parsers.py      # parse each config format
+  credentials.py  # what a credential looks like: detection + redaction
   rules/          # one detection rule per file
   report.py       # report generation
 tests/
