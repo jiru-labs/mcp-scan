@@ -61,6 +61,17 @@ def suspicious_config() -> Path:
 
 
 @pytest.fixture
+def broad_access_config() -> Path:
+    """A config with servers handed a root, a home, a whole disk and a shell.
+
+    The last server is the counterweight: it uses the same filesystem server as
+    the first two, scoped to a single project directory, and nothing may fire
+    on it.
+    """
+    return FIXTURES_DIR / "broad_access_config.json"
+
+
+@pytest.fixture
 def sample_secrets(sample_config: Path) -> list[str]:
     """Every credential value in the sample config.
 
