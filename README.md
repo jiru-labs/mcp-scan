@@ -40,13 +40,22 @@ To inspect one config file instead of discovering the installed hosts:
 mcp-scan list --config path/to/claude_desktop_config.json
 ```
 
+Scan those same servers for security risks:
+
+```bash
+mcp-scan scan
+mcp-scan scan --config path/to/claude_desktop_config.json
+```
+
+Every detection rule runs against every server found, and the findings are reported worst-first, each naming the server, the host and the config file it came from. A rule that fails is reported as a warning; it never takes the scan down with it.
+
+The detection rules themselves are landing now — see the [open issues](https://github.com/jiru-labs/mcp-scan/issues). Adding one is adding a file: drop a `Rule` subclass into `mcp_scan/rules/`, give it an `id`, a `title` and a `severity` of `INFO`, `WARN` or `CRITICAL`, and the engine picks it up.
+
 Print the version:
 
 ```bash
 mcp-scan version
 ```
-
-The `scan` command is on the way — see the [open issues](https://github.com/jiru-labs/mcp-scan/issues).
 
 ## Development
 

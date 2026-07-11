@@ -16,8 +16,54 @@ from mcp_scan.discovery import (
     ConfigLocation,
     find_all_configs,
 )
+from mcp_scan.parsers import MCPServer
+from mcp_scan.rules import Finding, Rule, Severity
 
 runner = CliRunner()
+
+
+class FlagsEveryServer(Rule):
+    """A dummy rule, standing in for the real ones until they land."""
+
+    id = "test-critical"
+    title = "Test rule that flags everything"
+    severity = Severity.CRITICAL
+
+    def check(self, server: MCPServer) -> list[Finding]:
+        return [self.finding(server, f"{server.name} was flagged")]
+
+
+class FlagsRemoteServers(Rule):
+    """A dummy rule of a lesser severity, to check the ordering."""
+
+    id = "test-info"
+    title = "Test rule that flags remote servers"
+    severity = Severity.INFO
+
+    def check(self, server: MCPServer) -> list[Finding]:
+        return [self.finding(server)] if server.url else []
+
+
+class FlagsNothing(Rule):
+    """A dummy rule that leaves every server alone."""
+
+    id = "test-clean"
+    title = "Test rule that flags nothing"
+    severity = Severity.WARN
+
+    def check(self, server: MCPServer) -> list[Finding]:
+        return []
+
+
+class BrokenRule(Rule):
+    """A dummy rule with a bug in it."""
+
+    id = "test-broken"
+    title = "Test rule that raises"
+    severity = Severity.WARN
+
+    def check(self, server: MCPServer) -> list[Finding]:
+        raise RuntimeError("boom")
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +91,11 @@ def _pretend_only_claude_desktop_config_at(
         host=HOST_CLAUDE_DESKTOP, path=path, exists=path.is_file()
     )
     monkeypatch.setattr(cli, "find_all_configs", lambda: [location])
+
+
+def _pretend_rules_are(monkeypatch: pytest.MonkeyPatch, *rules: Rule) -> None:
+    """Make `scan` run these rules instead of the ones shipped in the package."""
+    monkeypatch.setattr(cli, "load_rules", lambda: list(rules))
 
 
 def test_version_command_prints_version() -> None:
@@ -211,3 +262,136 @@ def test_list_never_prints_a_credential_from_any_host(
     # The keys, however, are exactly what the user needs to see.
     assert "LINEAR_API_KEY" in result.stdout
     assert "DATABASE_URL" in result.stdout
+
+
+def test_scan_shows_a_table_of_findings(
+    monkeypatch: pytest.MonkeyPatch, sample_config: Path
+) -> None:
+    _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+    assert result.exit_code == 0
+    assert "Findings" in result.stdout
+    assert "CRITICAL" in result.stdout
+    assert "test-critical" in result.stdout
+    # Every server in the config was checked, and its finding names it.
+    for server in ("filesystem", "github", "remote-notes"):
+        assert f"{server} was flagged" in result.stdout
+
+
+def test_scan_sorts_findings_worst_first(
+    monkeypatch: pytest.MonkeyPatch, sample_config: Path
+) -> None:
+    _pretend_rules_are(monkeypatch, FlagsRemoteServers(), FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+    assert result.exit_code == 0
+    # The lone INFO finding lands below every CRITICAL one, whatever order the
+    # rules ran in.
+    assert result.stdout.index("CRITICAL") < result.stdout.index("INFO")
+    assert result.stdout.rindex("CRITICAL") < result.stdout.index("INFO")
+
+
+def test_scan_reports_a_clean_config(
+    monkeypatch: pytest.MonkeyPatch, sample_config: Path
+) -> None:
+    _pretend_rules_are(monkeypatch, FlagsNothing())
+
+    result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+    assert result.exit_code == 0
+    assert "No findings in 3 servers." in result.stdout
+
+
+def test_scan_discovers_installed_hosts_when_no_config_given(
+    monkeypatch: pytest.MonkeyPatch, installed_hosts: InstalledHosts
+) -> None:
+    _pretend_hosts_installed_at(
+        monkeypatch, installed_hosts.home, installed_hosts.project_dir
+    )
+    _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan"])
+
+    assert result.exit_code == 0
+    # A finding for a server of every host, each naming the host it came from.
+    assert "cursor-search was flagged" in result.stdout
+    assert HOST_CURSOR in result.stdout
+    assert "project-db was flagged" in result.stdout
+    assert HOST_CLAUDE_CODE in result.stdout
+
+
+def test_scan_reports_when_no_config_is_found(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _pretend_only_claude_desktop_config_at(monkeypatch, tmp_path / "missing.json")
+    _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan"])
+
+    assert result.exit_code == 0
+    assert "No MCP config files found." in result.stdout
+
+
+def test_scan_warns_on_malformed_config_without_crashing(
+    monkeypatch: pytest.MonkeyPatch, malformed_config: Path
+) -> None:
+    _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan", "--config", str(malformed_config)])
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "malformed JSON" in result.stdout
+
+
+def test_scan_warns_about_a_broken_rule_and_keeps_scanning(
+    monkeypatch: pytest.MonkeyPatch, sample_config: Path
+) -> None:
+    _pretend_rules_are(monkeypatch, BrokenRule(), FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "test-broken" in result.stdout
+    # The healthy rule still reported.
+    assert "filesystem was flagged" in result.stdout
+
+
+def test_list_renders_a_server_name_that_looks_like_console_markup(
+    markup_config: Path,
+) -> None:
+    """A hostile server name is printed literally, not parsed as Rich markup."""
+    result = runner.invoke(app, ["list", "--config", str(markup_config)])
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "evil [/bold]" in result.stdout
+
+
+def test_scan_renders_a_server_name_that_looks_like_console_markup(
+    monkeypatch: pytest.MonkeyPatch, markup_config: Path
+) -> None:
+    _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan", "--config", str(markup_config)])
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    # The name survives into the finding the rule built from it.
+    assert "evil [/bold] was flagged" in result.stdout
+
+
+def test_scan_never_prints_a_credential(
+    monkeypatch: pytest.MonkeyPatch, sample_config: Path, sample_secrets: list[str]
+) -> None:
+    _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+    result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+    assert sample_secrets  # the fixture must actually carry secrets to test
+    for secret in sample_secrets:
+        assert secret not in result.stdout

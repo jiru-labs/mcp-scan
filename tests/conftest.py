@@ -30,6 +30,16 @@ def malformed_config() -> Path:
 
 
 @pytest.fixture
+def markup_config() -> Path:
+    """A config whose server name and args read as Rich console markup.
+
+    Names come from the config, so they are attacker-controlled: rendering one
+    as markup would mangle the report or crash the command.
+    """
+    return FIXTURES_DIR / "markup_config.json"
+
+
+@pytest.fixture
 def sample_secrets(sample_config: Path) -> list[str]:
     """Every env var value in the sample config.
 

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "evil [/bold]": {
+      "command": "node",
+      "args": ["[red]server.js[/red]"]
+    }
+  }
+}
