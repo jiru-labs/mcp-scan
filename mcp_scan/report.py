@@ -184,6 +184,18 @@ def display_path(path: Path) -> str:
     return str(path)
 
 
+def display_source(server: MCPServer) -> str:
+    """Where a server was declared: `~/.claude.json:12`.
+
+    The `path:line` spelling is not decoration — it is what an editor and most
+    terminals will open at the line, and it is the difference between telling a
+    reader which file to go and search and telling them where to look. A server
+    whose line the parser could not find is named by its file alone.
+    """
+    path = display_path(server.source)
+    return f"{path}:{server.line}" if server.line else path
+
+
 def terminal(report: Report) -> RenderableType:
     """The findings, as blocks grouped under the server each one fired on.
 
@@ -277,6 +289,11 @@ def to_json(report: Report) -> str:
                     "name": finding.server.name,
                     "host": finding.server.host,
                     "source": str(finding.server.source),
+                    # Null when the parser could not find the declaration in the
+                    # config's text. A consumer that opens the file gets a line to
+                    # jump to; one that gets null knows there is none to jump to,
+                    # which is not the same thing as line 1.
+                    "line": finding.server.line,
                 },
             }
             for finding in report.findings
@@ -292,6 +309,7 @@ def to_json(report: Report) -> str:
                 "env_keys": list(server.env_keys),
                 "env_static_keys": list(server.env_static_keys),
                 "source": str(server.source),
+                "line": server.line,
             }
             for server in report.servers
         ],
@@ -308,14 +326,16 @@ def to_sarif(report: Report) -> str:
     carrying its remediation as the alert's help text. Severities map as the
     module docstring says: CRITICAL/WARN/INFO to error/warning/note.
 
-    A finding's location is the config file, not a line of it. mcp-scan reads a
-    config as a parsed document and knows nothing of the offsets its servers came
-    from, and inventing one would be a lie at the exact resolution the reader
-    trusts most. But GitHub will not display a result with no `region` at all, so
-    the region it gets is line 1: the honest reading is "in this file", and the
-    line the alert lands on carries no claim beyond that. Pointing it at the line
-    the server is actually declared on needs the parser to track offsets, which is
-    filed separately.
+    A finding is located at the line its server is declared on, which is what puts
+    the alert on the offending server in the diff of a pull request rather than on
+    the first line of the config. That line comes from the parser, which reads it
+    back out of the config's own text (`parsers._ServerLines`).
+
+    A server the parser could not find a line for falls back to line 1 — the
+    honest reading of which is "somewhere in this file", and the alert claims
+    nothing beyond that. It is a fallback and not an omission because GitHub
+    refuses to display a result carrying no region at all: dropping the region
+    would drop the finding.
     """
     rules = _sarif_rules(report.findings)
     index = {rule["id"]: position for position, rule in enumerate(rules)}
@@ -412,8 +432,9 @@ def _sarif_result(finding: Finding, index: dict[str, int]) -> dict:
         "locations": [
             {
                 "physicalLocation": {
-                    "artifactLocation": {"uri": _sarif_uri(finding.server.source)},
-                    "region": {"startLine": 1},
+                    "artifactLocation": {"uri": _sarif_uri(server.source)},
+                    # Line 1 stands for "this file, line unknown" — see `to_sarif`.
+                    "region": {"startLine": server.line or 1},
                 }
             }
         ],
@@ -445,16 +466,21 @@ def _sarif_fingerprint(finding: Finding) -> str:
 
     GitHub matches an alert to the one it saw yesterday by fingerprint, and
     generates one itself when a result carries none — from the rule and the
-    location, which here is a whole file with no line to it. Every finding in one
-    config would then be fingerprinted alike, collapse into a single alert, and
-    the rest would vanish on upload. A dropped finding is the one failure a
-    scanner may not have, so the fingerprint is ours to compute.
+    location, which is a file and a line. Two findings of one rule on one server
+    share both, so they would be fingerprinted alike, collapse into a single
+    alert, and one of them would vanish on upload. A dropped finding is the one
+    failure a scanner may not have, so the fingerprint is ours to compute.
 
     It is built from everything that tells two findings apart: the rule, the
     server — named, as everywhere else, by where it was declared and not by its
     name alone — and the message, which is what distinguishes one finding of a
     rule from the next one it makes on the same server (`Rule.check` returns a
     list because a command may carry two credentials, and each is its own alert).
+
+    The line is deliberately not among them, though the result now carries one.
+    A finding does not become a different finding because a server moved down the
+    file, and hashing the line would retire every alert on a config the moment
+    somebody added a server above them.
 
     Including the message costs a re-created alert whenever a rule is reworded.
     That is the right way round: an alert that comes back after a rewrite is a
@@ -593,7 +619,7 @@ def _server_heading(server: MCPServer) -> Text:
         "  ",
         (server.host, "cyan"),
         "\n",
-        (display_path(server.source), "dim"),
+        (display_source(server), "dim"),
     )
 
 
@@ -684,7 +710,7 @@ def _markdown_servers(report: Report) -> list[str]:
         f"| {_text(server.transport)} "
         f"| {_code(server.redacted_endpoint) if server.redacted_endpoint else '—'} "
         f"| {', '.join(_code(key) for key in server.env_keys) or '—'} "
-        f"| {_code(display_path(server.source))} |"
+        f"| {_code(display_source(server))} |"
         for server in report.servers
     ]
 

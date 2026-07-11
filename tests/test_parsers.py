@@ -23,6 +23,7 @@ from mcp_scan.parsers import (
     TRANSPORT_REMOTE,
     TRANSPORT_STDIO,
     TRANSPORT_UNKNOWN,
+    _ServerLines,
     parse_config_file,
 )
 
@@ -507,3 +508,154 @@ def test_fields_of_an_unexpected_type_are_dropped(tmp_path: Path) -> None:
     assert server.args == ()
     assert server.env_keys == ()
     assert server.transport == TRANSPORT_UNKNOWN
+
+
+def test_each_server_carries_the_line_it_was_declared_on(sample_config: Path) -> None:
+    """The line a reader has to reach to fix the server, and SARIF's region."""
+    result = parse_config_file(sample_config)
+
+    assert {server.name: server.line for server in result.servers} == {
+        "filesystem": 3,
+        "github": 7,
+        "remote-notes": 14,
+    }
+
+
+def test_a_local_scope_server_carries_its_own_line(tmp_path: Path) -> None:
+    """A server nested under `projects` is found where it actually sits."""
+    path = tmp_path / "claude.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {"top": {"command": "npx"}},
+                "projects": {"/work": {"mcpServers": {"local": {"command": "uvx"}}}},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = parse_config_file(path)
+
+    assert {server.name: server.line for server in result.servers} == {
+        "top": 3,
+        "local": 10,
+    }
+
+
+def test_one_name_declared_twice_gets_a_line_each(tmp_path: Path) -> None:
+    """The same server configured globally and again inside a project.
+
+    Both are real declarations, and an alert on one may not point at the other.
+    """
+    path = tmp_path / "claude.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {"github": {"command": "docker"}},
+                "projects": {"/work": {"mcpServers": {"github": {"command": "npx"}}}},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = parse_config_file(path)
+
+    assert [server.line for server in result.servers] == [3, 10]
+
+
+def test_an_env_key_does_not_steal_the_line_of_a_server_named_after_it(
+    tmp_path: Path,
+) -> None:
+    """`env` is an object too, and its key would match the same shape.
+
+    A server called `env` must still be found at its own declaration rather than
+    at the `env` block of the server declared above it.
+    """
+    path = tmp_path / "odd.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "first": {"command": "npx", "env": {"TOKEN": "x"}},
+                    "env": {"command": "uvx"},
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = parse_config_file(path)
+
+    assert {server.name: server.line for server in result.servers} == {
+        "first": 3,
+        "env": 9,
+    }
+
+
+def test_json_inside_an_argument_is_not_mistaken_for_a_declaration(
+    tmp_path: Path,
+) -> None:
+    """An argument may carry a snippet of JSON. It is a value, not structure.
+
+    A server whose command line hands another program a config would otherwise
+    offer up a `"github": {` of its own, and the real `github` below it would be
+    reported at the wrong line — in an argument, of all places, which is where a
+    hostile config would put one on purpose.
+    """
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "wrapper": {
+                        "command": "npx",
+                        "args": ['{"github": {"command": "evil"}}'],
+                    },
+                    "github": {"command": "docker"},
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = parse_config_file(path)
+
+    assert {server.name: server.line for server in result.servers} == {
+        "wrapper": 3,
+        "github": 9,
+    }
+
+
+def test_a_name_the_text_does_not_declare_has_no_line(tmp_path: Path) -> None:
+    """None, not 1: a line nobody found is not a line at the top of the file.
+
+    No valid config reaches this — every server the parser reads is an object
+    under a key, which is exactly what the locator looks for. It is the floor
+    under the feature: a server whose line is unknown says so, and the renderers
+    are held to rendering that (`test_report`), rather than to a 1 they would
+    have no way of telling apart from a real first line.
+    """
+    lines = _ServerLines('{"mcpServers": {"github": {"command": "npx"}}}')
+
+    assert lines.take("github") == 1
+    assert lines.take("github") is None
+    assert lines.take("never-declared") is None
+
+
+def test_a_key_name_is_decoded_before_it_is_matched(tmp_path: Path) -> None:
+    """A config may spell a name in escapes; the parsed server never does."""
+    path = tmp_path / "escaped.json"
+    path.write_text(
+        '{\n  "mcpServers": {\n    "gr\\u00fcn/a": {\n      "command": "npx"\n    }\n  }\n}',
+        encoding="utf-8",
+    )
+
+    result = parse_config_file(path)
+    server = result.servers[0]
+
+    assert server.name == "grün/a"
+    assert server.line == 3

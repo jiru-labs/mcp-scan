@@ -49,12 +49,13 @@ mcp-scan scan
 mcp-scan scan --config path/to/claude_desktop_config.json
 ```
 
-Every detection rule runs against every server found, and the findings are reported worst-first, grouped under the server each one fired on:
+Every detection rule runs against every server found, and the findings are reported worst-first, grouped under the server each one fired on. The heading says where the server is declared, down to the line, so the fix is one click away in most terminals:
 
 ```
 ─ Findings ─────────────────────────────────────────────────────────────────
 
-installer  claude-desktop  ~/Library/Application Support/Claude/claude_desktop_config.json
+installer  claude-desktop
+~/Library/Application Support/Claude/claude_desktop_config.json:12
 
   CRITICAL  remote-code-execution
   the launch command downloads code and pipes it straight into an interpreter;
@@ -126,7 +127,7 @@ esac
     sarif_file: results.sarif
 ```
 
-`CRITICAL` maps to SARIF's `error`, `WARN` to `warning`, `INFO` to `note`. A project-scoped config — `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` — is located relative to the repository, so its alerts land on the file in the pull request that introduced them. A config outside the repository, like `~/.claude.json`, is reported with an absolute path: the alert still names the server, the rule and the file, but GitHub has no line of your diff to pin it to, because there isn't one.
+`CRITICAL` maps to SARIF's `error`, `WARN` to `warning`, `INFO` to `note`. A project-scoped config — `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` — is located relative to the repository, so its alerts land on the line of the pull request that declares the offending server, not on the top of the file: with four servers in one config, the alert is on the one that tripped the rule. A config outside the repository, like `~/.claude.json`, is reported with an absolute path: the alert still names the server, the rule, the file and the line, but GitHub has no diff of yours to pin it to, because the file is not in it.
 
 A scan that did not complete says so in the SARIF too (`invocations[0].executionSuccessful` is `false`, with each warning alongside it), so an upload can never quietly turn a config nobody read into a repository with no alerts.
 
