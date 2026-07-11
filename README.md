@@ -1,12 +1,12 @@
-# mcp-audit
+# mcp-config-audit
 
-[![CI](https://github.com/jiru-labs/mcp-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/jiru-labs/mcp-audit/actions/workflows/ci.yml)
+[![CI](https://github.com/jiru-labs/mcp-config-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/jiru-labs/mcp-config-audit/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Security scanner for local MCP (Model Context Protocol) configurations.
 
-`mcp-audit` reads the MCP config files on your machine — Claude Desktop, Claude Code, Cursor, VS Code, Windsurf — and reports what the configuration itself gives away: credentials written into it in plain text, servers reached in the clear, launch commands that download and run remote code or resolve a package name anyone could claim, and servers handed a whole filesystem or an unrestricted shell.
+`mcp-config-audit` reads the MCP config files on your machine — Claude Desktop, Claude Code, Cursor, VS Code, Windsurf — and reports what the configuration itself gives away: credentials written into it in plain text, servers reached in the clear, launch commands that download and run remote code or resolve a package name anyone could claim, and servers handed a whole filesystem or an unrestricted shell.
 
 It reads the configuration, not the servers. A tool's *description* — where a tool-poisoning payload actually hides, as an instruction to the agent that the user never sees — is served by the running server, not written in the config file, so no rule here reads one. What the rules flag instead are the conditions that let a payload be planted, and the permissions that decide how much it could take: a plaintext transport an attacker can rewrite descriptions over, a launch command whose code can change under you between one run and the next, and a server given far more of your machine than its job needs. That is a narrower claim than "detects tool poisoning", and it is the true one.
 
@@ -17,18 +17,18 @@ It is built for individual developers and small teams who don't have enterprise 
 ## Install
 
 ```bash
-pipx install git+https://github.com/jiru-labs/mcp-audit
+pipx install git+https://github.com/jiru-labs/mcp-config-audit
 ```
 
 There is no PyPI release yet, so install from source for now. Once `0.1.0` is
-published, `pipx install mcp-audit` is all it takes.
+published, `pipx install mcp-config-audit` is all it takes.
 
 ## Usage
 
 List the MCP servers declared in the host configs found on your machine, grouped by the host that declares them:
 
 ```bash
-mcp-audit list
+mcp-config-audit list
 ```
 
 These are the files it looks for:
@@ -43,19 +43,21 @@ These are the files it looks for:
 
 A host you don't have installed is simply skipped, not an error. Every scope is attributed to the host that owns it, so a server added with `claude mcp add --scope local` shows up under Claude Code just like the others.
 
-No credential is ever printed. Environment variables are listed by name only — `mcp-audit` never reads, prints or stores their values — and a credential written into a command line or a URL is masked where the endpoint is shown: `npx server --api-key=***`, `https://mcp.example.com/sse?api_key=***`. A value referenced from the environment, `--api-key=${API_KEY}`, is left readable: it is the fix, not the leak.
+> **Windows is unverified.** The Windows paths above are implemented and unit-tested, but the tool has never been run on an actual Windows machine, and the test suite does not yet pass there ([#45](https://github.com/jiru-labs/mcp-config-audit/issues/45)). Linux and macOS are tested on every commit against Python 3.11, 3.12 and 3.13. Saying so is cheaper than letting you find out.
+
+No credential is ever printed. Environment variables are listed by name only — `mcp-config-audit` never reads, prints or stores their values — and a credential written into a command line or a URL is masked where the endpoint is shown: `npx server --api-key=***`, `https://mcp.example.com/sse?api_key=***`. A value referenced from the environment, `--api-key=${API_KEY}`, is left readable: it is the fix, not the leak.
 
 To inspect one config file instead of discovering the installed hosts:
 
 ```bash
-mcp-audit list --config path/to/claude_desktop_config.json
+mcp-config-audit list --config path/to/claude_desktop_config.json
 ```
 
 Scan those same servers for security risks:
 
 ```bash
-mcp-audit scan
-mcp-audit scan --config path/to/claude_desktop_config.json
+mcp-config-audit scan
+mcp-config-audit scan --config path/to/claude_desktop_config.json
 ```
 
 Every detection rule runs against every server found, and the findings are reported worst-first, grouped under the server each one fired on. The heading says where the server is declared, down to the line, so the fix is one click away in most terminals:
@@ -80,16 +82,16 @@ A rule that fails is reported as a warning; it never takes the scan down with it
 ### Sharing the result
 
 ```bash
-mcp-audit scan --output report.md        # readable, and rendered by GitHub
-mcp-audit scan --output report.json      # stable, for whatever reads it next
-mcp-audit scan --output results.sarif    # for a CI security dashboard
+mcp-config-audit scan --output report.md        # readable, and rendered by GitHub
+mcp-config-audit scan --output report.json      # stable, for whatever reads it next
+mcp-config-audit scan --output results.sarif    # for a CI security dashboard
 ```
 
 The extension picks the format. The markdown is written for someone who was not at the keyboard: the summary, a table of findings, and a **Recommendations** section saying what to actually do about each rule that fired — once per rule, however many servers tripped it. The JSON carries the same facts under a `schema_version`, including the exit code, so a consumer never has to re-derive the verdict or parse a word of the terminal output.
 
 No format contains a credential value. Each says plainly when the scan did not complete, so a report cannot be mistaken for a clean bill of health that nobody actually gave.
 
-`mcp-audit` will refuse to write a report over a config file it just read — `--output ~/.claude.json` is one keystroke away, and a scanner that eats the configuration it was pointed at is worse than no scanner at all.
+`mcp-config-audit` will refuse to write a report over a config file it just read — `--output ~/.claude.json` is one keystroke away, and a scanner that eats the configuration it was pointed at is worse than no scanner at all.
 
 ### In a script, or in CI
 
@@ -106,7 +108,7 @@ No format contains a credential value. Each says plainly when the scan did not c
 So a pipeline can gate on the verdict without reading a word of the output:
 
 ```bash
-mcp-audit scan --quiet || echo "MCP config needs attention"
+mcp-config-audit scan --quiet || echo "MCP config needs attention"
 ```
 
 `--quiet` (`-q`) drops the findings and prints the summary line alone. It does *not* silence warnings — a config that could not be parsed, or a rule that crashed, still says so. A warning is not a risk it found; it is a risk it failed to look for, and that is the last thing a CI run should swallow.
@@ -116,7 +118,7 @@ Which is also why a warning exits `3`, and why `3` outranks even a `CRITICAL`. C
 A CI job that wants the detail as well as the verdict can have both:
 
 ```bash
-mcp-audit scan --quiet --output report.json
+mcp-config-audit scan --quiet --output report.json
 case $? in
   0) echo "clean" ;;
   1|2) echo "risks found — see report.json" ;;
@@ -129,7 +131,7 @@ esac
 `--output results.sarif` writes [SARIF](https://sarifweb.azurewebsites.net/), which is what GitHub code scanning, GitLab and most CI security dashboards read. Upload it and each finding becomes an alert in the **Security** tab — tagged as a security alert and ranked, with the rule's remediation as its help text — instead of scrolling past in a job log nobody opens:
 
 ```yaml
-- run: mcp-audit scan --output results.sarif
+- run: mcp-config-audit scan --output results.sarif
   continue-on-error: true          # let the upload run; the alerts are the gate
 - uses: github/codeql-action/upload-sarif@v3
   with:
@@ -176,12 +178,12 @@ A finding tells you *where* the credential is — which variable, which argument
 
 The last two are the ones that decide how much a *successful* attack costs you, which is why they fire on servers that are otherwise perfectly legitimate. They are a statement about blast radius, not an accusation.
 
-More rules are landing — see the [open issues](https://github.com/jiru-labs/mcp-audit/issues). Adding one is adding a file: drop a `Rule` subclass into `mcp_audit/rules/`, give it an `id`, a `title` and a `severity` of `INFO`, `WARN` or `CRITICAL`, and the engine picks it up.
+More rules are landing — see the [open issues](https://github.com/jiru-labs/mcp-config-audit/issues). Adding one is adding a file: drop a `Rule` subclass into `mcp_config_audit/rules/`, give it an `id`, a `title` and a `severity` of `INFO`, `WARN` or `CRITICAL`, and the engine picks it up.
 
 Print the version:
 
 ```bash
-mcp-audit version
+mcp-config-audit version
 ```
 
 ## Development

@@ -9,17 +9,17 @@ from conftest import InstalledHosts
 from rich.console import Console
 from typer.testing import CliRunner, Result
 
-from mcp_audit import __version__, cli, report
-from mcp_audit.cli import app
-from mcp_audit.discovery import (
+from mcp_config_audit import __version__, cli, report
+from mcp_config_audit.cli import app
+from mcp_config_audit.discovery import (
     HOST_CLAUDE_CODE,
     HOST_CLAUDE_DESKTOP,
     HOST_CURSOR,
     ConfigLocation,
     find_all_configs,
 )
-from mcp_audit.parsers import MCPServer
-from mcp_audit.rules import Finding, Rule, Severity
+from mcp_config_audit.parsers import MCPServer
+from mcp_config_audit.rules import Finding, Rule, Severity
 
 runner = CliRunner()
 
@@ -386,7 +386,7 @@ class TestExitCodes:
     """The verdict a script reads: the worst finding of the run, and nothing else.
 
     A pipeline gates on this without parsing a word of the output, so each code
-    is asserted as the literal number `mcp-audit` promises.
+    is asserted as the literal number `mcp-config-audit` promises.
     """
 
     def test_a_clean_scan_exits_0(

@@ -1,4 +1,4 @@
-# Contributing to mcp-audit
+# Contributing to mcp-config-audit
 
 Thanks for looking. Bug reports, false positives, missing hosts and new rules
 are all welcome.
@@ -9,8 +9,8 @@ Found a **security** problem in the tool itself? Don't open an issue — see
 ## Getting set up
 
 ```bash
-git clone https://github.com/jiru-labs/mcp-audit
-cd mcp-audit
+git clone https://github.com/jiru-labs/mcp-config-audit
+cd mcp-config-audit
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -24,12 +24,12 @@ their machine should be something they can read in an afternoon.
 ## Adding a detection rule
 
 This is the most useful contribution, and the cheapest: **a rule is one file.**
-Drop a `Rule` subclass into `mcp_audit/rules/`, and the engine finds it — no
+Drop a `Rule` subclass into `mcp_config_audit/rules/`, and the engine finds it — no
 registry to edit, no import to add.
 
 ```python
-from mcp_audit.parsers import MCPServer
-from mcp_audit.rules.base import Finding, Rule, Severity
+from mcp_config_audit.parsers import MCPServer
+from mcp_config_audit.rules.base import Finding, Rule, Severity
 
 
 class MyRule(Rule):
@@ -51,7 +51,7 @@ Four things a rule must respect:
    imports, and it fails the build if a socket or a `subprocess` ever appears.
 2. **It never puts a credential value in a message.** Say *which* argument or
    variable holds the key. Never the key. Use the helpers in
-   `mcp_audit/credentials.py` to redact anything derived from the config,
+   `mcp_config_audit/credentials.py` to redact anything derived from the config,
    including URLs.
 3. **`message` is about this server; `remediation` is about the class of
    problem.** The message names the offending argument or path; the remediation
@@ -68,7 +68,7 @@ worse than one that says nothing.
 
 ## Adding a host
 
-`mcp_audit/discovery.py` locates config files per host; `mcp_audit/parsers.py`
+`mcp_config_audit/discovery.py` locates config files per host; `mcp_config_audit/parsers.py`
 reads each format. Note that hosts disagree about the top-level key — VS Code
 uses `servers`, everyone else uses `mcpServers` — and the parser picks by host
 rather than trying both, so a config parsed under the wrong host yields zero

@@ -48,5 +48,5 @@ body:
     attributes:
       value: |
         A rule is one file, and the engine discovers it automatically — if you'd
-        like to write it yourself, [CONTRIBUTING.md](https://github.com/jiru-labs/mcp-audit/blob/main/CONTRIBUTING.md)
+        like to write it yourself, [CONTRIBUTING.md](https://github.com/jiru-labs/mcp-config-audit/blob/main/CONTRIBUTING.md)
         shows the whole shape of one.

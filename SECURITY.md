@@ -1,6 +1,6 @@
 # Security policy
 
-`mcp-audit` reads security-sensitive files — your MCP configs, which hold your
+`mcp-config-audit` reads security-sensitive files — your MCP configs, which hold your
 API keys — so a bug in it can hurt you in ways an ordinary CLI bug cannot. This
 page says how to report one, and what counts as one.
 
@@ -8,7 +8,7 @@ page says how to report one, and what counts as one.
 
 **Do not open a public issue.** Use GitHub's private vulnerability reporting —
 the **Report a vulnerability** button under this repository's
-[Security tab](https://github.com/jiru-labs/mcp-audit/security/advisories/new) —
+[Security tab](https://github.com/jiru-labs/mcp-config-audit/security/advisories/new) —
 or email <llorens.p@proton.me>.
 
 Please include what you did, what happened, and what you expected instead. A
@@ -43,12 +43,12 @@ is a vulnerability, not a bug:
 
 ## What is not a vulnerability
 
-- **A finding about your own config.** If `mcp-audit` reports a hardcoded key or
+- **A finding about your own config.** If `mcp-config-audit` reports a hardcoded key or
   a `curl | sh` launch command, it is working: the risk is in your config, and
   the finding tells you how to fix it.
 - **A rule that misses something.** A false negative is a gap in coverage —
   valuable, and very welcome as a normal
-  [issue](https://github.com/jiru-labs/mcp-audit/issues) or a new rule.
+  [issue](https://github.com/jiru-labs/mcp-config-audit/issues) or a new rule.
 - **A false positive.** Same: open a normal issue with the config that trips it.
 
 ## Supported versions

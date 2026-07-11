@@ -21,13 +21,13 @@ secret manager) and let the config reference it — `"${GITHUB_TOKEN}"`.
 
 No rule here ever handles a credential value. The env rule cannot: the parser
 keeps names only. The other two have to look at an argument or a URL to judge
-it, and `mcp_audit.credentials` gives them back a label — where the value is, and
+it, and `mcp_config_audit.credentials` gives them back a label — where the value is, and
 what flag or parameter it hides behind — never the value itself.
 """
 
-from mcp_audit.credentials import credentials_in, credentials_in_url, names_a_secret
-from mcp_audit.parsers import MCPServer
-from mcp_audit.rules.base import Finding, Rule, Severity
+from mcp_config_audit.credentials import credentials_in, credentials_in_url, names_a_secret
+from mcp_config_audit.parsers import MCPServer
+from mcp_config_audit.rules.base import Finding, Rule, Severity
 
 
 class StaticCredentialInEnv(Rule):

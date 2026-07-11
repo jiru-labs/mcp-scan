@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcp-audit"
+name = "mcp-config-audit"
 version = "0.1.0"
 description = "Local-first security scanner for MCP (Model Context Protocol) configurations. No account, no telemetry, no network calls."
 readme = "README.md"
@@ -35,16 +35,16 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jiru-labs/mcp-audit"
-Source = "https://github.com/jiru-labs/mcp-audit"
-Issues = "https://github.com/jiru-labs/mcp-audit/issues"
-Security = "https://github.com/jiru-labs/mcp-audit/blob/main/SECURITY.md"
+Homepage = "https://github.com/jiru-labs/mcp-config-audit"
+Source = "https://github.com/jiru-labs/mcp-config-audit"
+Issues = "https://github.com/jiru-labs/mcp-config-audit/issues"
+Security = "https://github.com/jiru-labs/mcp-config-audit/blob/main/SECURITY.md"
 
 [project.scripts]
-mcp-audit = "mcp_audit.cli:app"
+mcp-config-audit = "mcp_config_audit.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mcp_audit"]
+packages = ["mcp_config_audit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

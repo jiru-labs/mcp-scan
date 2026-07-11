@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from mcp_audit.parsers import MCPServer
-from mcp_audit.rules import Finding, Rule, Severity, load_rules, run_rules
+from mcp_config_audit.parsers import MCPServer
+from mcp_config_audit.rules import Finding, Rule, Severity, load_rules, run_rules
 
 
 class AlwaysFires(Rule):
@@ -140,7 +140,7 @@ def _write_rules_package(root: Path, name: str, modules: dict[str, str]) -> None
 
 
 RULE_MODULE = """
-from mcp_audit.rules import Finding, Rule, Severity
+from mcp_config_audit.rules import Finding, Rule, Severity
 
 
 class {class_name}(Rule):
@@ -182,7 +182,7 @@ def test_load_rules_ignores_a_module_that_defines_no_rule(
         tmp_path,
         "helper_rules",
         {
-            "helpers": "from mcp_audit.rules import Rule, Severity\n\nSHARED = 1\n",
+            "helpers": "from mcp_config_audit.rules import Rule, Severity\n\nSHARED = 1\n",
             "real": RULE_MODULE.format(class_name="Real", rule_id="real"),
         },
     )

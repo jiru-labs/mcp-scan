@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcp_audit.credentials import (
+from mcp_config_audit.credentials import (
     REDACTED,
     credentials_in,
     credentials_in_url,

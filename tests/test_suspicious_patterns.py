@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from mcp_audit.parsers import MCPServer, parse_config_file
-from mcp_audit.rules import Severity, run_rules
-from mcp_audit.rules.suspicious_patterns import (
+from mcp_config_audit.parsers import MCPServer, parse_config_file
+from mcp_config_audit.rules import Severity, run_rules
+from mcp_config_audit.rules.suspicious_patterns import (
     ExecutableInTempDir,
     InsecureTransport,
     RemoteCodeExecution,

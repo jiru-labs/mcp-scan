@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mcp_audit.discovery import (
+from mcp_config_audit.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
     CURSOR_CONFIG_RELPATH,
@@ -149,7 +149,7 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
 
 
 #: A query parameter of a fixture URL whose value is a credential. Spelled out
-#: here rather than imported from `mcp_audit.credentials`, so that a hole in the
+#: here rather than imported from `mcp_config_audit.credentials`, so that a hole in the
 #: scanner's own idea of what a secret looks like cannot quietly blind the test
 #: that checks it never prints one.
 SECRET_QUERY_PARAM = re.compile(r"[?&](?:[^=&]*_)?(?:key|token|secret|password)=([^&]+)")

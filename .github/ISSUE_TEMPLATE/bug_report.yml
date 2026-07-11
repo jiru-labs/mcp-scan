@@ -12,7 +12,7 @@ body:
         A flaw in the scanner itself — it printed a credential value, it made a
         network call, it wrote to a file it shouldn't have — is a *security*
         report, not a bug report. Do not file it here; see
-        [SECURITY.md](https://github.com/jiru-labs/mcp-audit/blob/main/SECURITY.md).
+        [SECURITY.md](https://github.com/jiru-labs/mcp-config-audit/blob/main/SECURITY.md).
 
   - type: dropdown
     id: kind
@@ -50,7 +50,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The output of `mcp-audit version`.
+      description: The output of `mcp-config-audit version`.
     validations:
       required: true
 

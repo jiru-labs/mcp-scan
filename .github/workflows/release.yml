@@ -12,9 +12,9 @@ name: Release
 # Configure the trusted publisher once, at
 # https://pypi.org/manage/account/publishing/ :
 #
-#     PyPI project name: mcp-audit
+#     PyPI project name: mcp-config-audit
 #     Owner:             jiru-labs
-#     Repository:        mcp-audit
+#     Repository:        mcp-config-audit
 #     Workflow name:     release.yml
 #     Environment:       pypi
 
