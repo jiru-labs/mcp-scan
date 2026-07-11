@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import ClassVar
 
-from mcp_scan.parsers import MCPServer
+from mcp_audit.parsers import MCPServer
 
 
 class Severity(IntEnum):

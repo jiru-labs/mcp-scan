@@ -1,4 +1,4 @@
-# mcp-scan
+# mcp-audit
 
 ## What this project is
 
@@ -46,7 +46,7 @@ Philosophy: local-first, read-only by default, zero telemetry, clear and actiona
 ## Repo structure
 
 ```
-mcp_scan/
+mcp_audit/
   __init__.py
   cli.py          # Typer entrypoint
   discovery.py    # locate MCP config files per host
@@ -116,7 +116,7 @@ must not turn CI red); and no credential ever leaves the machine.
 ```bash
 pytest                  # run tests
 pip install -e ".[dev]" # install in development mode
-python -m mcp_scan      # run the CLI locally
+python -m mcp_audit      # run the CLI locally
 gh issue view N         # read issue N
 gh issue list           # list open issues
 ```

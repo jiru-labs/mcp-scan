@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from conftest import InstalledHosts
 
-from mcp_scan.discovery import (
+from mcp_audit.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
     CLAUDE_DESKTOP_CONFIG_RELPATH,

@@ -1,4 +1,4 @@
-"""Typer entrypoint for the mcp-scan CLI."""
+"""Typer entrypoint for the mcp-audit CLI."""
 
 from pathlib import Path
 from typing import Annotated
@@ -7,14 +7,14 @@ import typer
 from rich.console import Console
 from rich.text import Text
 
-from mcp_scan import __version__, report
-from mcp_scan.discovery import HOST_UNKNOWN, ConfigLocation, find_all_configs
-from mcp_scan.parsers import MCPServer, parse_config_file
-from mcp_scan.report import Report, SEVERITY_STYLES
-from mcp_scan.rules import Finding, Severity, load_rules, run_rules
+from mcp_audit import __version__, report
+from mcp_audit.discovery import HOST_UNKNOWN, ConfigLocation, find_all_configs
+from mcp_audit.parsers import MCPServer, parse_config_file
+from mcp_audit.report import Report, SEVERITY_STYLES
+from mcp_audit.rules import Finding, Severity, load_rules, run_rules
 
 app = typer.Typer(
-    name="mcp-scan",
+    name="mcp-audit",
     help="Scan local MCP configurations for security risks.",
     no_args_is_help=True,
     add_completion=False,
@@ -107,13 +107,13 @@ EXIT_INCOMPLETE = 3
 
 @app.callback()
 def main() -> None:
-    """Keep mcp-scan a command group even while only one command exists."""
+    """Keep mcp-audit a command group even while only one command exists."""
 
 
 @app.command()
 def version() -> None:
-    """Print the mcp-scan version."""
-    console.print(f"mcp-scan {__version__}")
+    """Print the mcp-audit version."""
+    console.print(f"mcp-audit {__version__}")
 
 
 @app.command("list")

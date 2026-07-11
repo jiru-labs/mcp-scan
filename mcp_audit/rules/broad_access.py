@@ -41,8 +41,8 @@ References:
 import re
 from pathlib import PurePosixPath
 
-from mcp_scan.parsers import MCPServer
-from mcp_scan.rules.base import Finding, Rule, Severity
+from mcp_audit.parsers import MCPServer
+from mcp_audit.rules.base import Finding, Rule, Severity
 
 #: What a config writes when it means "the user's home directory". Normalised to
 #: `~` before a path is judged, so each spelling reaches the same verdict.

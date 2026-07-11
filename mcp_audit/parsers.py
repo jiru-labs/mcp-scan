@@ -35,8 +35,8 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mcp_scan.credentials import is_env_reference, redact_args, redact_url
-from mcp_scan.discovery import HOST_UNKNOWN, HOST_VSCODE
+from mcp_audit.credentials import is_env_reference, redact_args, redact_url
+from mcp_audit.discovery import HOST_UNKNOWN, HOST_VSCODE
 
 SERVERS_KEY = "mcpServers"
 #: VS Code's spelling of the same concept — see the module docstring.

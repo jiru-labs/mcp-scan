@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from conftest import InstalledHosts
 
-from mcp_scan.discovery import (
+from mcp_audit.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
     CURSOR_CONFIG_RELPATH,
@@ -19,7 +19,7 @@ from mcp_scan.discovery import (
     WINDSURF_CONFIG_RELPATH,
     vscode_config_path,
 )
-from mcp_scan.parsers import (
+from mcp_audit.parsers import (
     TRANSPORT_REMOTE,
     TRANSPORT_STDIO,
     TRANSPORT_UNKNOWN,

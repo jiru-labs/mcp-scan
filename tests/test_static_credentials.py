@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from mcp_scan.parsers import MCPServer, parse_config_file
-from mcp_scan.rules import Severity, run_rules
-from mcp_scan.rules.static_credentials import (
+from mcp_audit.parsers import MCPServer, parse_config_file
+from mcp_audit.rules import Severity, run_rules
+from mcp_audit.rules.static_credentials import (
     StaticCredentialInArgs,
     StaticCredentialInEnv,
     StaticCredentialInUrl,
