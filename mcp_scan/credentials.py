@@ -242,6 +242,16 @@ def is_env_reference(value: str) -> bool:
 
 def _credential_in(arg: str) -> Credential | None:
     """Name the credential an argument carries, or None if it carries none."""
+    # A URL sitting in the arguments carries its secrets the way a remote
+    # server's URL does — a password in `user:password@`, a token in a query
+    # parameter — and it is masked by the same offset-based walk. Done first, and
+    # deliberately before the `name:value` split below: a URL is full of colons,
+    # and splitting on one would slice the userinfo into a label and quote the
+    # password there (`the value of 'https://user:secret@host/?token'`), leaking
+    # what this whole module exists to hide.
+    if "://" in arg and (url_secrets := _secrets_in_url(arg)):
+        return Credential(label=url_secrets[0][0], redacted=redact_url(arg))
+
     for separator in VALUE_SEPARATORS:
         name, found, value = arg.partition(separator)
         if found and names_a_secret(name) and _holds_a_secret(value):

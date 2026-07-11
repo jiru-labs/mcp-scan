@@ -1,5 +1,6 @@
 """Tests for the CLI entrypoint."""
 
+import json
 import os
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from conftest import InstalledHosts
 from rich.console import Console
 from typer.testing import CliRunner, Result
 
-from mcp_scan import __version__, cli
+from mcp_scan import __version__, cli, report
 from mcp_scan.cli import app
 from mcp_scan.discovery import (
     HOST_CLAUDE_CODE,
@@ -274,12 +275,12 @@ def test_display_path_abbreviates_only_paths_under_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
 
-    assert cli._display_path(home / ".cursor" / "mcp.json") == "~/.cursor/mcp.json"
+    assert report.display_path(home / ".cursor" / "mcp.json") == "~/.cursor/mcp.json"
     # A config outside home — a project's .mcp.json — keeps its full path.
     outside = tmp_path / "work" / "repo" / ".mcp.json"
-    assert cli._display_path(outside) == str(outside)
+    assert report.display_path(outside) == str(outside)
 
 
 def test_list_never_prints_a_credential_from_any_host(
@@ -335,7 +336,7 @@ def test_list_leaves_a_credential_referenced_from_the_environment_readable(
     assert "--api-key=${API_KEY}" in result.stdout
 
 
-def test_scan_shows_a_table_of_findings(
+def test_scan_shows_the_findings(
     monkeypatch: pytest.MonkeyPatch, sample_config: Path
 ) -> None:
     _pretend_rules_are(monkeypatch, FlagsEveryServer())
@@ -580,6 +581,203 @@ class TestIncompleteScan:
         assert "No MCP config files found." in result.stdout
 
 
+class TestOutput:
+    """`--output`: the same scan, written to a file for someone else to read."""
+
+    def test_a_md_path_writes_a_markdown_report(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+        output = tmp_path / "report.md"
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(sample_config), "--output", str(output)]
+        )
+
+        assert result.exit_code == EXIT_CRITICAL
+        assert output.read_text(encoding="utf-8").startswith("# MCP scan report")
+        assert str(output) in result.stdout
+
+    def test_a_json_path_writes_a_json_report(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+        output = tmp_path / "report.json"
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(sample_config), "-o", str(output)]
+        )
+
+        assert result.exit_code == EXIT_CRITICAL
+
+        document = json.loads(output.read_text(encoding="utf-8"))
+        assert document["summary"]["findings"] == 3
+        # The report knows what the shell was told, so a consumer need not guess.
+        assert document["summary"]["exit_code"] == EXIT_CRITICAL
+
+    def test_the_report_is_written_even_when_quiet(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
+    ) -> None:
+        """--quiet is about the terminal. The file was asked for separately."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+        output = tmp_path / "report.json"
+
+        result = runner.invoke(
+            app,
+            ["scan", "--config", str(sample_config), "-o", str(output), "--quiet"],
+        )
+
+        assert result.exit_code == EXIT_CRITICAL
+        assert json.loads(output.read_text(encoding="utf-8"))["findings"]
+
+    def test_an_unwritable_format_exits_3_rather_than_reporting_a_verdict(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
+    ) -> None:
+        """Asked for a report and given none, the run did not do what it was told.
+
+        The findings still stand and are still printed — but a pipeline about to
+        read `report.txt` would find last week's file, or none, and must not be
+        told the run went fine.
+        """
+        _pretend_rules_are(monkeypatch, FlagsNothing())
+        output = tmp_path / "report.txt"
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(sample_config), "-o", str(output)]
+        )
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert not _crashed(result)
+        assert "report.txt" in result.stdout
+        assert not output.exists()
+
+    def test_it_refuses_to_write_the_report_over_the_config_it_scanned(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`--output ~/.claude.json` is a typo away, and would eat the config."""
+        config = tmp_path / ".claude.json"
+        original = '{"mcpServers": {"github": {"command": "npx"}}}'
+        config.write_text(original, encoding="utf-8")
+
+        _pretend_rules_are(monkeypatch, FlagsNothing())
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(config), "-o", str(config)]
+        )
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert not _crashed(result)
+        # The config is exactly as it was. This is the whole point.
+        assert config.read_text(encoding="utf-8") == original
+
+    def test_it_refuses_even_when_the_config_declared_no_servers(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The real hazard: a `~/.claude.json` is mostly not an mcpServers block.
+
+        The scan reads such a file and parses zero servers from it, so a guard
+        that leaned on the parsed servers would find nothing to protect and write
+        the report straight over the user's startup state.
+        """
+        config = tmp_path / ".claude.json"
+        original = '{"numStartups": 42, "projects": {"/app": {}}, "userID": "keep"}'
+        config.write_text(original, encoding="utf-8")
+
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(config), "-o", str(config)]
+        )
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert not _crashed(result)
+        assert config.read_text(encoding="utf-8") == original
+
+    def test_a_directory_that_does_not_exist_is_reported_not_raised(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
+    ) -> None:
+        _pretend_rules_are(monkeypatch, FlagsNothing())
+        output = tmp_path / "nowhere" / "report.md"
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(sample_config), "-o", str(output)]
+        )
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert not _crashed(result)
+        assert "error:" in result.stdout
+
+    def test_an_incomplete_scan_still_exits_3_when_the_report_was_written(
+        self, monkeypatch: pytest.MonkeyPatch, malformed_config: Path, tmp_path: Path
+    ) -> None:
+        """Writing a report about a scan that failed does not make it a success."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+        output = tmp_path / "report.json"
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(malformed_config), "-o", str(output)]
+        )
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert json.loads(output.read_text(encoding="utf-8"))["summary"]["complete"] is False
+
+    def test_the_report_never_writes_a_credential(
+        self, sample_config: Path, sample_secrets: list[str], tmp_path: Path
+    ) -> None:
+        """The real rules, the real config, both formats, on disk."""
+        for name in ("report.md", "report.json"):
+            output = tmp_path / name
+
+            runner.invoke(
+                app, ["scan", "--config", str(sample_config), "-o", str(output)]
+            )
+
+            written = output.read_text(encoding="utf-8")
+            assert sample_secrets  # the fixture must actually carry secrets
+            for secret in sample_secrets:
+                assert secret not in written, name
+
+    def test_the_report_masks_a_credential_a_rule_message_names(
+        self, tmp_path: Path
+    ) -> None:
+        """The nastiest case: a secret carried where a rule quotes it back.
+
+        A plaintext URL trips `insecure-transport`, whose message names the URL,
+        and a proxy server carries a password in a URL in its own args. Both are
+        printed and written, and neither may carry the secret to disk — with the
+        real rules, not a stand-in, since it is the rules doing the quoting.
+        """
+        password = "hunter2SuperSecret"
+        token = "sk-abcdef0123456789abcdef01"
+        config = tmp_path / "leaky.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "plain": {"url": f"http://u:{password}@evil.example.com/mcp?api_key={token}"},
+                        "proxy": {
+                            "command": "npx",
+                            "args": ["mcp-remote", f"https://u:{password}@host.example.com/sse"],
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        for name in ("report.md", "report.json"):
+            output = tmp_path / name
+
+            result = runner.invoke(
+                app, ["scan", "--config", str(config), "-o", str(output)]
+            )
+            assert not _crashed(result)
+
+            written = output.read_text(encoding="utf-8")
+            assert password not in written, name
+            assert token not in written, name
+
+
 class TestQuiet:
     """`--quiet`: the summary line, and whatever the run failed to look at."""
 
@@ -635,10 +833,10 @@ class TestQuiet:
         assert result.exit_code == EXIT_INCOMPLETE
         assert "malformed JSON" in result.stdout
 
-    def test_the_summary_is_printed_with_the_table_too(
+    def test_the_summary_is_printed_with_the_findings_too(
         self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
     ) -> None:
-        """--quiet drops the table. It does not add the summary."""
+        """--quiet drops the findings. It does not add the summary."""
         _pretend_rules_are(monkeypatch, FlagsEveryServer())
 
         result = runner.invoke(app, ["scan", "--config", str(sample_config)])

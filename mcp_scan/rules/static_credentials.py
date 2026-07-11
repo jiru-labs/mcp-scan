@@ -36,6 +36,14 @@ class StaticCredentialInEnv(Rule):
     id = "static-credential-in-env"
     title = "Credential hardcoded in an environment variable"
     severity = Severity.WARN
+    remediation = (
+        "Take the value out of the config file and reference the environment "
+        'instead: `"GITHUB_TOKEN": "${GITHUB_TOKEN}"`. Export the real value '
+        "from your shell profile, or keep it in a secret manager and let that "
+        "inject it. Then rotate the credential: it has been sitting in a plaintext "
+        "file, readable by anything running as you, and it went along with every "
+        "copy and every commit of that file."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         return [
@@ -55,6 +63,16 @@ class StaticCredentialInArgs(Rule):
     id = "static-credential-in-args"
     title = "Credential hardcoded in a command argument"
     severity = Severity.CRITICAL
+    remediation = (
+        "Take the credential off the command line. If the server reads it from "
+        "the environment, move it to an `env` entry that references one: "
+        '`"env": {"API_KEY": "${API_KEY}"}`. If it only accepts a flag, most '
+        "servers will also take the flag's value from a file — pass a path, not "
+        "the secret. Then rotate the credential, and treat it as already "
+        "disclosed: on a command line it is readable from `ps` by every process "
+        "running as you, and it was copied into whatever shell history or process "
+        "log recorded the launch."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         return [
@@ -76,6 +94,14 @@ class StaticCredentialInUrl(Rule):
     id = "static-credential-in-url"
     title = "Credential hardcoded in a server URL"
     severity = Severity.CRITICAL
+    remediation = (
+        "Take the credential out of the URL. If the server supports it, send it "
+        "in an `Authorization` header instead, or in an env-referenced variable — "
+        "a header is not logged the way a request line is. Then rotate the "
+        "credential, and treat it as already disclosed: a URL travels, so this one "
+        "is in the access log at the far end, in every proxy along the way, and "
+        "wherever the URL has been pasted since."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         if not server.url:

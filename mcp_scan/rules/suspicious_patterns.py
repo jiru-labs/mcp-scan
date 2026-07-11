@@ -44,6 +44,7 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
+from mcp_scan.credentials import redact_url
 from mcp_scan.parsers import MCPServer
 from mcp_scan.rules.base import Finding, Rule, Severity
 
@@ -141,6 +142,14 @@ class RemoteCodeExecution(Rule):
     id = "remote-code-execution"
     title = "Launch command downloads and executes remote code"
     severity = Severity.CRITICAL
+    remediation = (
+        "Stop piping a download into a shell. Install the server the ordinary way "
+        "— a pinned package, or a repository you have checked out at a revision "
+        "you have read — and launch that. If you must use the script, download it "
+        "once, read it, and keep your own copy under your control; what you audit "
+        "today and what the remote host serves tomorrow are not promised to be the "
+        "same file, and this launcher would never tell you they had diverged."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         if not server.command or not FETCHERS.search(server.endpoint):
@@ -165,14 +174,28 @@ class InsecureTransport(Rule):
     id = "insecure-transport"
     title = "Server reached over an unencrypted connection"
     severity = Severity.CRITICAL
+    remediation = (
+        "Reach the server over `https://`. If it does not offer TLS, that is the "
+        "thing to fix — or to walk away from. Plain HTTP is not only readable on "
+        "the network path, it is writable: an attacker in the middle rewrites the "
+        "tool descriptions your agent reads, and the agent follows them. Rotate "
+        "anything the server was authorized with, since it has been going out in "
+        "the clear. (A server on `127.0.0.1` never leaves your machine, and is the "
+        "one fair exception.)"
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         return [
             self.finding(
                 server,
-                f"the server is reached at '{url}', in the clear; anyone on the "
-                f"network path can read the traffic — credentials included — and "
-                f"rewrite the tool descriptions the agent acts on",
+                # The URL names the server for the user, but it may carry a
+                # password in `user:pass@` or a token in a query parameter — and
+                # this finding is a message, printed to the terminal and written
+                # into the report. It is masked like every other endpoint we
+                # show: the point is the scheme, not the secret riding on it.
+                f"the server is reached at '{redact_url(url)}', in the clear; "
+                f"anyone on the network path can read the traffic — credentials "
+                f"included — and rewrite the tool descriptions the agent acts on",
             )
             for url in _urls_of(server)
             if _is_plaintext(url)
@@ -185,6 +208,14 @@ class ExecutableInTempDir(Rule):
     id = "executable-in-temp-dir"
     title = "Server executable lives in a world-writable directory"
     severity = Severity.WARN
+    remediation = (
+        "Move the executable somewhere only you can write — alongside the project "
+        "it belongs to, or an installation directory owned by your user — and "
+        "point the config at it there. A world-writable directory is one any other "
+        "process on the machine can write to, so what runs at the next launch is "
+        "whatever was last written to that path, and nothing about the config "
+        "would look any different."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         findings = []
@@ -210,6 +241,14 @@ class UnscopedPackage(Rule):
     id = "unscoped-package"
     title = "Package resolved from an unowned namespace at every launch"
     severity = Severity.WARN
+    remediation = (
+        "Pin what you run. Give the package an exact version (`my-server@1.2.3`) "
+        "so that the same code launches every time, and prefer a scoped package "
+        "(`@vendor/my-server`) from a namespace whose owner you know. An unscoped "
+        "name on a moving tag is re-resolved from the registry at every launch: "
+        "you are trusting whoever controls that name at that moment, and the "
+        "answer can change without you touching a thing."
+    )
 
     def check(self, server: MCPServer) -> list[Finding]:
         package = _package_run_by(server)

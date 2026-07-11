@@ -109,6 +109,43 @@ class TestRedactArgs:
 
         assert redact_args(args) == ("--api-key", REDACTED, "--token=***")
 
+    def test_masks_a_credential_inside_a_url_passed_as_an_argument(self) -> None:
+        """A proxy server puts the remote URL in its args, secrets and all.
+
+        The URL is masked by the same walk a remote server's `url` field is —
+        the password in `user:password@`, the token in a query parameter — so a
+        stdio server cannot smuggle out through its command line what a remote
+        server could not through its endpoint.
+        """
+        password = "hunter2secret"
+        args = (
+            "mcp-remote",
+            f"https://user:{password}@host.example.com/sse?api_key={FAKE_API_KEY}",
+        )
+
+        redacted = redact_args(args)
+
+        rendered = " ".join(redacted)
+        assert password not in rendered
+        assert FAKE_API_KEY not in rendered
+        assert redacted[1] == "https://user:***@host.example.com/sse?api_key=***"
+
+    def test_names_a_url_credential_without_quoting_the_secret(self) -> None:
+        """The label is printed too, so it must not slice the URL on a colon.
+
+        Splitting `https://user:password@host/?token=x` on its first `:` would
+        put the userinfo into the flag name and quote the password there. The URL
+        walk names it — `a password` — and echoes none of it.
+        """
+        password = "hunter2secret"
+        (credential,) = credentials_in(
+            (f"https://user:{password}@host.example.com/?token=x",)
+        )
+
+        assert credential is not None
+        assert password not in credential.label
+        assert credential.label == "a password"
+
     def test_leaves_a_flag_whose_value_comes_from_the_environment_alone(self) -> None:
         """`${API_KEY}` is the fix, not the leak: masking it would hide that."""
         args = ("--api-key=${API_KEY}", "--token", "$GITHUB_TOKEN")
