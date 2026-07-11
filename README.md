@@ -32,7 +32,7 @@ These are the files it looks for:
 
 A host you don't have installed is simply skipped, not an error.
 
-Environment variables are listed by name only — `mcp-scan` never reads, prints or stores their values.
+No credential is ever printed. Environment variables are listed by name only — `mcp-scan` never reads, prints or stores their values — and a credential passed inline on a command line is masked where the command is shown: `npx server --api-key=***`. A value referenced from the environment, `--api-key=${API_KEY}`, is left readable: it is the fix, not the leak.
 
 To inspect one config file instead of discovering the installed hosts:
 
@@ -58,7 +58,7 @@ Every detection rule runs against every server found, and the findings are repor
 
 The fix for both is to keep the value in your environment (or a secret manager) and have the config reference it — `"GITHUB_TOKEN": "${GITHUB_TOKEN}"`. A config that already does is not flagged.
 
-A finding tells you *where* the credential is — which variable, which argument — and never what it is. The value is not printed, stored or logged.
+A finding tells you *where* the credential is — which variable, which argument — and never what it is. The value is not printed, stored or logged, by any command.
 
 More rules are landing — see the [open issues](https://github.com/jiru-labs/mcp-scan/issues). Adding one is adding a file: drop a `Rule` subclass into `mcp_scan/rules/`, give it an `id`, a `title` and a `severity` of `INFO`, `WARN` or `CRITICAL`, and the engine picks it up.
 

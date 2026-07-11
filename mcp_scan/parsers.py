@@ -14,10 +14,10 @@ exception.
 """
 
 import json
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mcp_scan.credentials import is_env_reference, redact_args
 from mcp_scan.discovery import HOST_UNKNOWN
 
 SERVERS_KEY = "mcpServers"
@@ -25,10 +25,6 @@ SERVERS_KEY = "mcpServers"
 TRANSPORT_STDIO = "stdio"
 TRANSPORT_REMOTE = "remote"
 TRANSPORT_UNKNOWN = "unknown"
-
-#: A value that is nothing but a pointer at the real environment: `$TOKEN`,
-#: `${TOKEN}`, or the `${env:TOKEN}` form Cursor and VS Code use.
-ENV_REFERENCE = re.compile(r"\$\{[^{}]+\}|\$[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass(frozen=True)
@@ -66,9 +62,30 @@ class MCPServer:
 
     @property
     def endpoint(self) -> str:
-        """The command line or URL the host would use to reach the server."""
+        """The command line or URL the host would use to reach the server.
+
+        Verbatim, and therefore unsafe to print: an argument can carry a
+        credential inline (`--api-key=ghp_…`), and this is where it would be.
+        Rules read it to judge the server; anything rendering it for a human
+        wants `redacted_endpoint` instead.
+        """
         if self.command:
             return " ".join((self.command, *self.args))
+        return self.url or ""
+
+    @property
+    def redacted_endpoint(self) -> str:
+        """The same endpoint, with any credential in its arguments masked.
+
+        What every report prints. The command line survives intact — the user
+        needs to recognise the server and find the argument to fix — and only
+        the secret is replaced: `npx server --api-key=***`.
+
+        A credential *inside a URL* is not masked yet: nothing detects one, and
+        masking what no rule can find would only hide it from the user too.
+        """
+        if self.command:
+            return " ".join((self.command, *redact_args(self.args)))
         return self.url or ""
 
 
@@ -176,16 +193,6 @@ def _build_server(name: str, definition: dict, source: Path, host: str) -> MCPSe
         env_keys=env_keys,
         env_static_keys=env_static_keys,
     )
-
-
-def is_env_reference(value: str) -> bool:
-    """True when a value only points at an environment variable, and holds none.
-
-    A config that says `"GITHUB_TOKEN": "${GITHUB_TOKEN}"` pins no secret to
-    disk: the host expands the reference from the environment it was launched
-    with. The credential rules treat such a value as the fix, not the problem.
-    """
-    return ENV_REFERENCE.fullmatch(value.strip()) is not None
 
 
 def _is_written_into_the_config(value: object) -> bool:

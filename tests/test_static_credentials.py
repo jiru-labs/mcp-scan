@@ -9,7 +9,6 @@ from mcp_scan.rules import Severity, run_rules
 from mcp_scan.rules.static_credentials import (
     StaticCredentialInArgs,
     StaticCredentialInEnv,
-    names_a_secret,
 )
 
 # A GitHub token, an OpenAI-style key and a JWT, in the shape the real ones come
@@ -34,46 +33,6 @@ def _server(
         env_keys=env_keys,
         env_static_keys=env_static_keys,
     )
-
-
-class TestNamesASecret:
-    """The shared name test, which decides what both rules even look at."""
-
-    @pytest.mark.parametrize(
-        "name",
-        [
-            "GITHUB_TOKEN",
-            "API_KEY",
-            "APIKEY",
-            "AWS_SECRET",
-            "DB_PASSWORD",
-            "--api-key",
-            "X-Api-Key",
-            "Authorization",
-        ],
-    )
-    def test_a_name_ending_in_a_secret_word_names_a_secret(self, name: str) -> None:
-        assert names_a_secret(name)
-
-    @pytest.mark.parametrize(
-        "name",
-        [
-            # A path to a secret is not a secret, and neither is a switch that
-            # merely mentions one.
-            "SSH_KEY_PATH",
-            "TOKEN_FILE",
-            "AUTH_MODE",
-            "--verbose",
-            "LOG_LEVEL",
-            "HOME",
-            # `PWD` is the working directory, not a password.
-            "PWD",
-        ],
-    )
-    def test_a_name_that_only_mentions_a_secret_does_not_name_one(
-        self, name: str
-    ) -> None:
-        assert not names_a_secret(name)
 
 
 class TestStaticCredentialInEnv:

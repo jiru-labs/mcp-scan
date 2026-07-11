@@ -52,8 +52,9 @@ def list_servers(
 ) -> None:
     """List the MCP servers declared in your local host configs.
 
-    Servers are grouped by the host that declares them. Environment variables
-    are reported by name only; their values are never read into the report.
+    Servers are grouped by the host that declares them. No credential is ever
+    printed: environment variables are reported by name only, and a credential
+    passed inline in a command argument is masked.
     """
     locations, servers, warnings = _read_servers(config)
 
@@ -164,7 +165,7 @@ def _servers_table(servers: list[MCPServer]) -> Table:
                 host if position == 0 else "",
                 _quoted(server.name),
                 server.transport,
-                _quoted(server.endpoint or "-"),
+                _quoted(server.redacted_endpoint or "-"),
                 _quoted(", ".join(server.env_keys) or "-"),
                 _quoted(_display_path(server.source)),
             )
