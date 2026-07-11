@@ -88,6 +88,7 @@ Neither format contains a credential value. Both say plainly when the scan did n
 | `1` | The worst finding is a `WARN`. |
 | `2` | A `CRITICAL` was found. |
 | `3` | The run did not complete, so it has no verdict to give: a config would not parse, a rule crashed, or `--output` could not be written. |
+| `64` | The command was misused — an unknown flag, a missing value, a command that does not exist. This is `EX_USAGE`, kept off the verdict codes so a typo can never read as a finding. |
 
 So a pipeline can gate on the verdict without reading a word of the output:
 

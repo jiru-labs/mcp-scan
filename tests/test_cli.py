@@ -30,6 +30,7 @@ EXIT_CLEAN = 0
 EXIT_WARN = 1
 EXIT_CRITICAL = 2
 EXIT_INCOMPLETE = 3
+EXIT_USAGE = 64
 
 
 def _crashed(result: Result) -> bool:
@@ -444,6 +445,50 @@ class TestExitCodes:
         _pretend_rules_are(monkeypatch, FlagsEveryServer())
 
         result = runner.invoke(app, ["scan"])
+
+        assert result.exit_code == EXIT_CLEAN
+
+
+class TestUsageErrors:
+    """A misuse of the CLI must not read as a verdict about a config.
+
+    Click exits 2 for a usage error, which is our CRITICAL. A pipeline gating on
+    the exit code would take a typo'd flag for a critical finding, so a usage
+    error gets its own code (64, EX_USAGE) that collides with none of 0-3.
+    """
+
+    def test_an_unknown_flag_does_not_look_like_a_critical(self) -> None:
+        result = runner.invoke(app, ["scan", "--no-such-flag"])
+
+        assert result.exit_code == EXIT_USAGE
+        assert result.exit_code != EXIT_CRITICAL
+
+    def test_a_missing_option_value_does_not_look_like_a_critical(self) -> None:
+        """`--config` with no path after it."""
+        result = runner.invoke(app, ["scan", "--config"])
+
+        assert result.exit_code == EXIT_USAGE
+        assert result.exit_code != EXIT_CRITICAL
+
+    def test_an_unknown_command_does_not_look_like_a_critical(self) -> None:
+        result = runner.invoke(app, ["frobnicate"])
+
+        assert result.exit_code == EXIT_USAGE
+        assert result.exit_code != EXIT_CRITICAL
+
+    def test_a_real_verdict_still_uses_its_own_code(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        """Moving usage errors off 2 must leave a genuine CRITICAL on 2."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_CRITICAL
+
+    def test_help_is_not_an_error(self) -> None:
+        """`--help` is a request that succeeded, not a misuse. Click exits 0."""
+        result = runner.invoke(app, ["--help"])
 
         assert result.exit_code == EXIT_CLEAN
 

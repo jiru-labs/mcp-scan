@@ -63,6 +63,30 @@ EXIT_CODES = {
 
 EXIT_CLEAN = 0
 
+#: A usage error: an unknown flag, a missing option value, a command that does
+#: not exist. The number is `EX_USAGE` from `sysexits.h`, the convention for
+#: exactly this, and — the point of the exercise — it is not one of the verdict
+#: codes above.
+#:
+#: Click exits `2` for a usage error, which is our CRITICAL. A pipeline gating on
+#: the verdict would read a typo in a flag as "a critical risk was found", which
+#: is a different untrue thing from the one #23 fixed but untrue all the same.
+#: Click decides a usage error's exit code from `UsageError.exit_code`, a class
+#: attribute shared by every usage error it raises, so moving that one number
+#: moves all of them — and it moves them for the real CLI and the test runner
+#: alike, since both reach the shell through the same Click machinery.
+EXIT_USAGE = 64
+
+# Typer vendors its own Click on newer releases and depends on the standalone
+# package on older ones; `typer>=0.12` spans both. Reach the UsageError class
+# from wherever this install keeps it, and retune its exit code.
+try:
+    from click.exceptions import UsageError as _UsageError
+except ModuleNotFoundError:  # pragma: no cover — one branch runs per install
+    from typer._click.exceptions import UsageError as _UsageError
+
+_UsageError.exit_code = EXIT_USAGE
+
 #: The run did not complete: a config could not be read, a rule crashed, or the
 #: report the user asked for could not be written.
 #:
