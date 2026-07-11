@@ -382,6 +382,244 @@ class TestJson:
         assert "injected" not in document
 
 
+class TestSarif:
+    """The CI dashboard's report: ingestible, and one alert per finding."""
+
+    def test_it_is_valid_sarif(self) -> None:
+        document = json.loads(
+            report.to_sarif(Report(servers=[_server()], findings=[_finding()]))
+        )
+
+        assert document["version"] == "2.1.0"
+        assert document["$schema"] == report.SARIF_SCHEMA
+
+        driver = document["runs"][0]["tool"]["driver"]
+        assert driver["name"] == "mcp-scan"
+        assert driver["version"]
+        assert driver["informationUri"]
+
+    def test_severities_map_onto_sarif_levels(self) -> None:
+        findings = [
+            _finding(rule_id="critical-rule", severity=Severity.CRITICAL),
+            _finding(rule_id="warn-rule", severity=Severity.WARN),
+            _finding(rule_id="info-rule", severity=Severity.INFO),
+        ]
+
+        results = json.loads(report.to_sarif(Report(findings=findings)))["runs"][0][
+            "results"
+        ]
+
+        assert [result["level"] for result in results] == ["error", "warning", "note"]
+
+    def test_a_rule_is_described_once_however_many_servers_tripped_it(self) -> None:
+        """The driver describes the rule; the results say where it fired."""
+        findings = [
+            _finding(server=_server(name=name), remediation="Rotate the key.")
+            for name in ("one", "two", "three")
+        ]
+
+        run = json.loads(report.to_sarif(Report(findings=findings)))["runs"][0]
+
+        assert len(run["tool"]["driver"]["rules"]) == 1
+        assert len(run["results"]) == 3
+
+    def test_every_result_indexes_the_rule_it_names(self) -> None:
+        """`ruleIndex` is an offset into the driver's rules, and must land."""
+        findings = [
+            _finding(rule_id="static-credential-in-args"),
+            _finding(rule_id="broad-filesystem-access", severity=Severity.WARN),
+            _finding(rule_id="static-credential-in-args", server=_server(name="other")),
+        ]
+
+        run = json.loads(report.to_sarif(Report(findings=findings)))["runs"][0]
+
+        rules = run["tool"]["driver"]["rules"]
+        for result in run["results"]:
+            assert rules[result["ruleIndex"]]["id"] == result["ruleId"]
+
+    def test_a_rule_carries_its_remediation_as_the_alert_help(self) -> None:
+        finding = _finding(remediation="Reference it: `${GITHUB_TOKEN}`.")
+
+        rule = json.loads(report.to_sarif(Report(findings=[finding])))["runs"][0][
+            "tool"
+        ]["driver"]["rules"][0]
+
+        assert rule["help"]["markdown"] == "Reference it: `${GITHUB_TOKEN}`."
+        assert rule["shortDescription"]["text"]
+        assert rule["defaultConfiguration"]["level"] == "error"
+
+    def test_a_finding_is_filed_as_a_security_alert_and_ranked(self) -> None:
+        """Without the tag GitHub files it as lint; without the number, unranked."""
+        findings = [
+            _finding(rule_id="critical-rule", severity=Severity.CRITICAL),
+            _finding(rule_id="warn-rule", severity=Severity.WARN),
+        ]
+
+        rules = json.loads(report.to_sarif(Report(findings=findings)))["runs"][0][
+            "tool"
+        ]["driver"]["rules"]
+
+        assert all("security" in rule["properties"]["tags"] for rule in rules)
+        severities = [rule["properties"]["security-severity"] for rule in rules]
+        assert float(severities[0]) > float(severities[1])
+
+    def test_a_config_in_the_repository_is_located_relative_to_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The case the format exists for: an alert GitHub can pin to the diff.
+
+        A relative URI is what lets code scanning map the result onto a file in
+        the pull request — for a project-scoped `.mcp.json`, that is the file the
+        pull request is changing.
+        """
+        monkeypatch.chdir(tmp_path)
+        config = tmp_path / ".mcp.json"
+        finding = _finding(server=_server(source=str(config)))
+
+        result = json.loads(report.to_sarif(Report(findings=[finding])))["runs"][0][
+            "results"
+        ][0]
+
+        location = result["locations"][0]["physicalLocation"]
+        assert location["artifactLocation"]["uri"] == ".mcp.json"
+        # GitHub will not display a result with no region at all.
+        assert location["region"]["startLine"] == 1
+
+    def test_a_config_outside_the_repository_keeps_an_absolute_uri(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A home config is not in the repository, and must not pretend to be."""
+        monkeypatch.chdir(tmp_path)
+        finding = _finding(server=_server(source="/home/dev/.claude.json"))
+
+        result = json.loads(report.to_sarif(Report(findings=[finding])))["runs"][0][
+            "results"
+        ][0]
+
+        uri = result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert uri.startswith("file://")
+        assert uri.endswith("/.claude.json")
+
+    def test_two_servers_in_one_file_tripping_one_rule_stay_two_alerts(self) -> None:
+        """The finding that would otherwise vanish on upload.
+
+        Both results carry the same rule and the same location — the config file,
+        with no line to tell them apart — so a dashboard generating its own
+        fingerprints would collapse them into one alert. The fingerprint we send
+        is what keeps them apart.
+        """
+        source = "/home/dev/.claude.json"
+        findings = [
+            _finding(server=_server(name="github", source=source)),
+            _finding(server=_server(name="postgres", source=source)),
+        ]
+
+        results = json.loads(report.to_sarif(Report(findings=findings)))["runs"][0][
+            "results"
+        ]
+
+        fingerprints = {
+            result["partialFingerprints"]["mcpScanFinding/v1"] for result in results
+        }
+        assert len(fingerprints) == 2
+
+    def test_one_rule_firing_twice_on_one_server_stays_two_alerts(self) -> None:
+        """The same trap again, and the easier one to walk into.
+
+        `Rule.check` returns a list precisely because a rule may find two things
+        wrong with one server — two credential-bearing arguments on one command,
+        say. Those findings share a rule, a server and a file, so anything the
+        fingerprint is built from must include what actually tells them apart:
+        what each one says.
+        """
+        server = _server()
+        findings = [
+            _finding(server=server, message="argument 3 holds the value of '--api-key'"),
+            _finding(server=server, message="argument 5 holds the value of '--token'"),
+        ]
+
+        results = json.loads(report.to_sarif(Report(findings=findings)))["runs"][0][
+            "results"
+        ]
+
+        fingerprints = {
+            result["partialFingerprints"]["mcpScanFinding/v1"] for result in results
+        }
+        assert len(fingerprints) == 2
+
+    def test_a_fingerprint_does_not_move_between_runs(self) -> None:
+        """An alert tracked across commits is an alert the user can close."""
+        finding = _finding()
+
+        first = json.loads(report.to_sarif(Report(findings=[finding])))
+        second = json.loads(report.to_sarif(Report(findings=[finding])))
+
+        assert (
+            first["runs"][0]["results"][0]["partialFingerprints"]
+            == second["runs"][0]["results"][0]["partialFingerprints"]
+        )
+
+    def test_an_incomplete_scan_says_so_where_a_dashboard_reads_it(self) -> None:
+        """A scan that never finished must not upload as a scan that came back clean."""
+        scanned = Report(warnings=["~/.claude.json: malformed JSON"], exit_code=3)
+
+        invocation = json.loads(report.to_sarif(scanned))["runs"][0]["invocations"][0]
+
+        assert invocation["executionSuccessful"] is False
+        assert invocation["toolExecutionNotifications"][0]["message"]["text"] == (
+            "~/.claude.json: malformed JSON"
+        )
+
+    def test_a_complete_scan_reports_a_successful_run(self) -> None:
+        invocation = json.loads(report.to_sarif(Report(servers=[_server()])))["runs"][0][
+            "invocations"
+        ][0]
+
+        assert invocation["executionSuccessful"] is True
+        assert invocation["toolExecutionNotifications"] == []
+
+    def test_a_clean_scan_is_a_run_with_no_results(self) -> None:
+        run = json.loads(report.to_sarif(Report(servers=[_server()])))["runs"][0]
+
+        assert run["results"] == []
+        assert run["tool"]["driver"]["rules"] == []
+
+    def test_it_never_writes_a_credential(
+        self, credentials_config: Path, credentials_secrets: list[str]
+    ) -> None:
+        document = report.to_sarif(_scan_of(credentials_config))
+
+        assert credentials_secrets  # the fixture must actually carry secrets
+        for secret in credentials_secrets:
+            assert secret not in document
+
+    def test_an_alert_says_which_server_it_is_about(self) -> None:
+        """SARIF has no server column, so the message is the only place to say it."""
+        finding = _finding(
+            server=_server(name="github", host="cursor"),
+            message="argument 3 of the command holds the value of '--api-key'",
+        )
+
+        result = json.loads(report.to_sarif(Report(findings=[finding])))["runs"][0][
+            "results"
+        ][0]
+
+        text = result["message"]["text"]
+        assert "github" in text
+        assert "cursor" in text
+        assert "argument 3 of the command holds the value of '--api-key'" in text
+
+    def test_a_hostile_server_name_cannot_break_the_document(self) -> None:
+        """A config that could reshape the SARIF about it would be quite a bug."""
+        finding = _finding(server=_server(name='evil", "injected": "yes'))
+
+        document = json.loads(report.to_sarif(Report(findings=[finding])))
+
+        result = document["runs"][0]["results"][0]
+        assert 'evil", "injected": "yes' in result["message"]["text"]
+        assert "injected" not in result
+
+
 class TestWrite:
     """`--output`: the extension picks the format, and some paths are refused."""
 
@@ -397,6 +635,41 @@ class TestWrite:
 
     def test_a_json_extension_writes_json(self, tmp_path: Path) -> None:
         path = tmp_path / "report.json"
+
+        report.write(Report(servers=[_server()], findings=[_finding()]), path)
+
+        assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 1
+
+    @pytest.mark.parametrize("name", ["results.sarif", "RESULTS.SARIF"])
+    def test_a_sarif_extension_writes_sarif(self, tmp_path: Path, name: str) -> None:
+        path = tmp_path / name
+
+        report.write(Report(servers=[_server()], findings=[_finding()]), path)
+
+        assert json.loads(path.read_text(encoding="utf-8"))["version"] == "2.1.0"
+
+    def test_a_sarif_json_extension_writes_sarif_and_not_json(
+        self, tmp_path: Path
+    ) -> None:
+        """`results.sarif.json` is the name GitHub's own docs use.
+
+        Its `Path.suffix` is `.json`, so a dispatch on the last suffix alone would
+        quietly write our JSON report into a file the pipeline then rejects as
+        invalid SARIF — for a reason nobody could see from the filename.
+        """
+        path = tmp_path / "results.sarif.json"
+
+        report.write(Report(servers=[_server()], findings=[_finding()]), path)
+
+        written = json.loads(path.read_text(encoding="utf-8"))
+        assert written["version"] == "2.1.0"
+        assert "schema_version" not in written
+
+    def test_an_unrelated_double_extension_still_writes_by_its_last(
+        self, tmp_path: Path
+    ) -> None:
+        """`.sarif.json` is a special case, not a licence to misread `x.y.json`."""
+        path = tmp_path / "mcp-scan.2026-07-11.json"
 
         report.write(Report(servers=[_server()], findings=[_finding()]), path)
 

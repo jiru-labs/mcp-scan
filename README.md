@@ -70,13 +70,14 @@ A rule that fails is reported as a warning; it never takes the scan down with it
 ### Sharing the result
 
 ```bash
-mcp-scan scan --output report.md      # readable, and rendered by GitHub
-mcp-scan scan --output report.json    # stable, for whatever reads it next
+mcp-scan scan --output report.md        # readable, and rendered by GitHub
+mcp-scan scan --output report.json      # stable, for whatever reads it next
+mcp-scan scan --output results.sarif    # for a CI security dashboard
 ```
 
 The extension picks the format. The markdown is written for someone who was not at the keyboard: the summary, a table of findings, and a **Recommendations** section saying what to actually do about each rule that fired — once per rule, however many servers tripped it. The JSON carries the same facts under a `schema_version`, including the exit code, so a consumer never has to re-derive the verdict or parse a word of the terminal output.
 
-Neither format contains a credential value. Both say plainly when the scan did not complete, so a report cannot be mistaken for a clean bill of health that nobody actually gave.
+No format contains a credential value. Each says plainly when the scan did not complete, so a report cannot be mistaken for a clean bill of health that nobody actually gave.
 
 `mcp-scan` will refuse to write a report over a config file it just read — `--output ~/.claude.json` is one keystroke away, and a scanner that eats the configuration it was pointed at is worse than no scanner at all.
 
@@ -112,6 +113,24 @@ case $? in
   3) echo "the scan did not complete — do not trust this run" ;;
 esac
 ```
+
+### GitHub code scanning
+
+`--output results.sarif` writes [SARIF](https://sarifweb.azurewebsites.net/), which is what GitHub code scanning, GitLab and most CI security dashboards read. Upload it and each finding becomes an alert in the **Security** tab — tagged as a security alert and ranked, with the rule's remediation as its help text — instead of scrolling past in a job log nobody opens:
+
+```yaml
+- run: mcp-scan scan --output results.sarif
+  continue-on-error: true          # let the upload run; the alerts are the gate
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+`CRITICAL` maps to SARIF's `error`, `WARN` to `warning`, `INFO` to `note`. A project-scoped config — `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` — is located relative to the repository, so its alerts land on the file in the pull request that introduced them. A config outside the repository, like `~/.claude.json`, is reported with an absolute path: the alert still names the server, the rule and the file, but GitHub has no line of your diff to pin it to, because there isn't one.
+
+A scan that did not complete says so in the SARIF too (`invocations[0].executionSuccessful` is `false`, with each warning alongside it), so an upload can never quietly turn a config nobody read into a repository with no alerts.
+
+`.sarif.json` works as well as `.sarif`, since GitHub's own documentation uses both.
 
 ### What it detects
 

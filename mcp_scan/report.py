@@ -1,13 +1,16 @@
 """Render a scan for the reader it is aimed at.
 
-Three readers, three shapes, one set of facts:
+Four readers, four shapes, one set of facts:
 
 * the terminal, where findings are printed as blocks — a heading per server,
   then each finding under it with room for the message to be a sentence;
 * markdown, for a report shared with someone who was not at the keyboard, and
   therefore needs the summary, the findings and what to do about them;
 * JSON, for whatever consumes the scan next, and needs the same facts in a
-  shape that will not move under it.
+  shape that will not move under it;
+* SARIF, for a CI security dashboard — GitHub code scanning, GitLab — which
+  will read no other shape, and turns the findings into annotations on the pull
+  request that introduced them.
 
 The blocks exist because a table did not work. Six columns at eighty is a
 thirteen-character `Finding` column, wrapping the one thing the user has to read
@@ -15,15 +18,23 @@ into a ribbon two words wide — and a finding nobody reads is a finding we did
 not make. A block gives the message the full width and costs nothing but a
 newline.
 
+SARIF speaks its own severities, so ours map onto them: CRITICAL is an `error`,
+WARN a `warning`, INFO a `note`. That much a dashboard reads on its own; GitHub
+additionally files an alert by the `security-severity` property, and only tags a
+result as a security problem at all when the rule says it is one — so each rule
+carries both, and mcp-scan's findings arrive in the Security tab as security
+findings rather than as lint.
+
 No renderer here ever prints a credential. Servers are printed through
 `redacted_endpoint`, environment variables by name only. `test_report` holds
 every format to that, against the secrets of the fixtures themselves.
 """
 
+import hashlib
 import json
 import re
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,10 +52,37 @@ from mcp_scan.rules import Finding, Severity
 #: when a key changes meaning or leaves; adding a key is not a break.
 SCHEMA_VERSION = 1
 
+#: The SARIF dialect we write. 2.1.0 is the OASIS standard, and what GitHub
+#: code scanning and GitLab both ingest.
+SARIF_VERSION = "2.1.0"
+SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
+
+#: Where mcp-scan lives, for the tool block of a report read far from here.
+PROJECT_URL = "https://github.com/jiru-labs/mcp-scan"
+
 SEVERITY_STYLES = {
     Severity.CRITICAL: "bold red",
     Severity.WARN: "yellow",
     Severity.INFO: "blue",
+}
+
+#: Our severities in SARIF's vocabulary. SARIF has a fourth level, `none`, for a
+#: result that reports something other than a problem; nothing here is that.
+SARIF_LEVELS = {
+    Severity.CRITICAL: "error",
+    Severity.WARN: "warning",
+    Severity.INFO: "note",
+}
+
+#: The same three severities again, on the CVSS-like scale GitHub sorts security
+#: alerts by: 9.0+ is critical, 7.0 high, 4.0 medium, anything below that low.
+#: Without this a security alert is filed by `level` alone, which puts every WARN
+#: and INFO in the same bucket — so the numbers exist to keep the ordering the
+#: user already sees in the terminal.
+SARIF_SECURITY_SEVERITIES = {
+    Severity.CRITICAL: "9.0",
+    Severity.WARN: "5.5",
+    Severity.INFO: "2.0",
 }
 
 #: Width the severity label is padded to, so rule names line up under each other
@@ -262,11 +300,196 @@ def to_json(report: Report) -> str:
     return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
 
-#: What `--output` can write, keyed by the extension that asks for it.
+def to_sarif(report: Report) -> str:
+    """The scan as SARIF, for a CI dashboard to annotate a pull request with.
+
+    Every finding becomes a result, pointing at the config file the server was
+    declared in; every rule that fired becomes a rule in the tool's driver, once,
+    carrying its remediation as the alert's help text. Severities map as the
+    module docstring says: CRITICAL/WARN/INFO to error/warning/note.
+
+    A finding's location is the config file, not a line of it. mcp-scan reads a
+    config as a parsed document and knows nothing of the offsets its servers came
+    from, and inventing one would be a lie at the exact resolution the reader
+    trusts most. But GitHub will not display a result with no `region` at all, so
+    the region it gets is line 1: the honest reading is "in this file", and the
+    line the alert lands on carries no claim beyond that. Pointing it at the line
+    the server is actually declared on needs the parser to track offsets, which is
+    filed separately.
+    """
+    rules = _sarif_rules(report.findings)
+    index = {rule["id"]: position for position, rule in enumerate(rules)}
+
+    document = {
+        "$schema": SARIF_SCHEMA,
+        "version": SARIF_VERSION,
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "mcp-scan",
+                        "version": __version__,
+                        "informationUri": PROJECT_URL,
+                        "rules": rules,
+                    }
+                },
+                "results": [
+                    _sarif_result(finding, index) for finding in report.findings
+                ],
+                # SARIF's way of saying what the markdown banner and the JSON's
+                # `complete` say: the run fell short, and its findings are not a
+                # verdict. A dashboard that reads only the results would otherwise
+                # show a scan that never finished as a scan that came back clean.
+                "invocations": [
+                    {
+                        "executionSuccessful": report.complete,
+                        "toolExecutionNotifications": [
+                            {"level": "warning", "message": {"text": warning}}
+                            for warning in report.warnings
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+
+
+def _sarif_rules(findings: Sequence[Finding]) -> list[dict]:
+    """One entry per rule that fired, in the order the findings first name them.
+
+    A rule appears once however many servers tripped it — the driver describes
+    the rule, and the results below it say where it fired.
+    """
+    rules: dict[str, dict] = {}
+    for finding in findings:
+        if finding.rule_id in rules:
+            continue
+
+        rule = {
+            "id": finding.rule_id,
+            "shortDescription": {"text": finding.title},
+            "defaultConfiguration": {"level": SARIF_LEVELS[finding.severity]},
+            "properties": {
+                # `security` is what makes GitHub file the result as a security
+                # alert rather than a code-quality one, and the number below is
+                # how it then ranks it.
+                "tags": ["security", "mcp"],
+                "security-severity": SARIF_SECURITY_SEVERITIES[finding.severity],
+            },
+        }
+        if finding.remediation:
+            # Ours, written as markdown, and rendered as such by a dashboard that
+            # can — the same string the markdown report puts under
+            # "Recommendations".
+            rule["help"] = {
+                "text": finding.remediation,
+                "markdown": finding.remediation,
+            }
+
+        rules[finding.rule_id] = rule
+
+    return list(rules.values())
+
+
+def _sarif_result(finding: Finding, index: dict[str, int]) -> dict:
+    """One finding, as the result a dashboard turns into an alert.
+
+    The message names the server, which no other renderer's has to: the terminal
+    heads a block with it, markdown and JSON each give it a field of its own, and
+    SARIF has nowhere to put it but here. Two servers in one config file trip a
+    rule and produce two alerts on the same file — and an alert that cannot say
+    which of them it is about is an alert nobody can act on.
+    """
+    server = finding.server
+    return {
+        "ruleId": finding.rule_id,
+        "ruleIndex": index[finding.rule_id],
+        "level": SARIF_LEVELS[finding.severity],
+        # The message is already redacted by the rule that made it, and the name
+        # and host come from the config, where neither is a secret.
+        "message": {"text": f"{server.name} ({server.host}): {finding.message}"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": _sarif_uri(finding.server.source)},
+                    "region": {"startLine": 1},
+                }
+            }
+        ],
+        "partialFingerprints": {"mcpScanFinding/v1": _sarif_fingerprint(finding)},
+    }
+
+
+def _sarif_uri(source: Path) -> str:
+    """Where a config file is, said in the way a dashboard can act on.
+
+    A config inside the repository being scanned is named relative to it, which
+    is what lets GitHub map the alert onto a file in the pull request — the whole
+    point of the format for a project-scoped `.mcp.json` or `.vscode/mcp.json`.
+
+    A config outside it — `~/.claude.json`, and every other host's — gets an
+    absolute `file://` URI. GitHub cannot map that onto the repository, and
+    should not: the file is not in it. The alert is still reported, still says
+    which server and which rule, and names a path the developer can open.
+    """
+    path = _resolved(source)
+    try:
+        return path.relative_to(_resolved(Path.cwd())).as_posix()
+    except ValueError:
+        return path.as_uri()
+
+
+def _sarif_fingerprint(finding: Finding) -> str:
+    """A stable identity for a finding, so a dashboard can track it across runs.
+
+    GitHub matches an alert to the one it saw yesterday by fingerprint, and
+    generates one itself when a result carries none — from the rule and the
+    location, which here is a whole file with no line to it. Every finding in one
+    config would then be fingerprinted alike, collapse into a single alert, and
+    the rest would vanish on upload. A dropped finding is the one failure a
+    scanner may not have, so the fingerprint is ours to compute.
+
+    It is built from everything that tells two findings apart: the rule, the
+    server — named, as everywhere else, by where it was declared and not by its
+    name alone — and the message, which is what distinguishes one finding of a
+    rule from the next one it makes on the same server (`Rule.check` returns a
+    list because a command may carry two credentials, and each is its own alert).
+
+    Including the message costs a re-created alert whenever a rule is reworded.
+    That is the right way round: an alert that comes back after a rewrite is a
+    nuisance, and a finding that never arrives is a vulnerability nobody was told
+    about.
+
+    The file is identified the way the result's location is, rather than by its
+    absolute path — the fingerprint has to survive the move from the developer's
+    machine to a CI runner, whose checkout is somewhere else entirely. Nothing
+    hashed here is a credential; a message reaches us already redacted.
+    """
+    server = finding.server
+    identity = "\0".join(
+        [
+            finding.rule_id,
+            server.host,
+            server.name,
+            _sarif_uri(server.source),
+            finding.message,
+        ]
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+#: What `--output` can write, keyed by the extension that asks for it. The
+#: compound `.sarif.json` is here because it is the name GitHub's own docs use,
+#: and `Path.suffix` would read it as plain `.json` — writing a JSON report to a
+#: file the pipeline then rejects as invalid SARIF, for a reason nobody could see
+#: from the filename.
 FORMATS = {
     ".md": to_markdown,
     ".markdown": to_markdown,
     ".json": to_json,
+    ".sarif": to_sarif,
+    ".sarif.json": to_sarif,
 }
 
 
@@ -277,7 +500,7 @@ def write(report: Report, path: Path) -> None:
         UnknownFormat: The extension names no format we can write.
         WouldOverwriteConfig: The path is one of the config files we just read.
     """
-    render = FORMATS.get(path.suffix.lower())
+    render = _format_for(path)
     if render is None:
         raise UnknownFormat(
             f"cannot write '{path.name}': expected one of "
@@ -287,6 +510,20 @@ def write(report: Report, path: Path) -> None:
     _refuse_to_overwrite_a_config(report, path)
 
     path.write_text(render(report), encoding="utf-8")
+
+
+def _format_for(path: Path) -> Callable[[Report], str] | None:
+    """The renderer a filename asks for, longest extension first.
+
+    Two suffixes before one, so `results.sarif.json` is SARIF rather than the
+    JSON its last suffix alone would name.
+    """
+    suffixes = [suffix.lower() for suffix in path.suffixes]
+    if not suffixes:
+        return None
+
+    compound = "".join(suffixes[-2:])
+    return FORMATS.get(compound) or FORMATS.get(suffixes[-1])
 
 
 def _refuse_to_overwrite_a_config(report: Report, path: Path) -> None:

@@ -662,6 +662,23 @@ class TestOutput:
         # The report knows what the shell was told, so a consumer need not guess.
         assert document["summary"]["exit_code"] == EXIT_CRITICAL
 
+    def test_a_sarif_path_writes_a_sarif_report(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
+    ) -> None:
+        """What a CI job uploads to GitHub code scanning."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+        output = tmp_path / "results.sarif"
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(sample_config), "-o", str(output)]
+        )
+
+        assert result.exit_code == EXIT_CRITICAL
+
+        document = json.loads(output.read_text(encoding="utf-8"))
+        assert document["version"] == "2.1.0"
+        assert len(document["runs"][0]["results"]) == 3
+
     def test_the_report_is_written_even_when_quiet(
         self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
     ) -> None:
@@ -772,7 +789,7 @@ class TestOutput:
         self, sample_config: Path, sample_secrets: list[str], tmp_path: Path
     ) -> None:
         """The real rules, the real config, both formats, on disk."""
-        for name in ("report.md", "report.json"):
+        for name in ("report.md", "report.json", "results.sarif"):
             output = tmp_path / name
 
             runner.invoke(
@@ -812,7 +829,7 @@ class TestOutput:
             encoding="utf-8",
         )
 
-        for name in ("report.md", "report.json"):
+        for name in ("report.md", "report.json", "results.sarif"):
             output = tmp_path / name
 
             result = runner.invoke(

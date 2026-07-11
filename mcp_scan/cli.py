@@ -45,7 +45,8 @@ OUTPUT_OPTION = typer.Option(
     "-o",
     help=(
         "Also write the report to this file. The extension picks the format: "
-        ".md for markdown, .json for JSON."
+        ".md for markdown, .json for JSON, .sarif (or .sarif.json) for SARIF, "
+        "which GitHub code scanning and other CI dashboards read."
     ),
 )
 
@@ -155,9 +156,10 @@ def scan(
     because a config would not parse, a rule crashed, or --output could not be
     written, exits 3 rather than passing off a partial look as a verdict.
 
-    With --output, the same report is written to a file as markdown or JSON,
-    for sharing or for whatever consumes the scan next. With --quiet, the
-    summary line is all it prints, and the exit code carries the rest.
+    With --output, the same report is written to a file as markdown, JSON or
+    SARIF — for sharing, for whatever consumes the scan next, or for uploading
+    to GitHub code scanning. With --quiet, the summary line is all it prints,
+    and the exit code carries the rest.
     """
     locations, servers, warnings = _read_servers(config)
 
