@@ -52,6 +52,19 @@ pyproject.toml
   `%APPDATA%/Claude/claude_desktop_config.json`.
 - Claude Code: global `~/.claude.json`, plus per-project `.mcp.json`.
 - Cursor: global `~/.cursor/mcp.json`, plus per-project `.cursor/mcp.json`.
+- VS Code: macOS `~/Library/Application Support/Code/User/mcp.json`, Linux
+  `~/.config/Code/User/mcp.json`, Windows `%APPDATA%/Code/User/mcp.json`, plus
+  per-project `.vscode/mcp.json`. VS Code's top-level key is `servers`, not
+  `mcpServers` — `parsers.py` picks the key by host rather than trying both,
+  so a config discovered under the wrong host still parses to zero servers
+  instead of a silent, misleading "clean scan".
+- Windsurf: global `~/.codeium/windsurf/mcp_config.json` (no documented
+  project-scoped config).
+- Not yet supported: Continue.dev. Its `config.json` nests servers under
+  `experimental.modelContextProtocolServers` as a list, not a `mcpServers`/
+  `servers` map, and its documented direction is a YAML format the parser
+  doesn't read — discovering it needs real parser work first (tracked in a
+  follow-up issue).
 
 ## Working rules for Claude Code
 

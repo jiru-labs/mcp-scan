@@ -2,7 +2,7 @@
 
 Security scanner for local MCP (Model Context Protocol) configurations.
 
-`mcp-scan` reads the MCP config files on your machine — Claude Desktop, Claude Code, Cursor — and reports security risks: unverified servers, exposed static credentials, overly broad permissions, and tool poisoning patterns in tool descriptions.
+`mcp-scan` reads the MCP config files on your machine — Claude Desktop, Claude Code, Cursor, VS Code, Windsurf — and reports security risks: unverified servers, exposed static credentials, overly broad permissions, and tool poisoning patterns in tool descriptions.
 
 It is built for individual developers and small teams who don't have enterprise security tooling.
 
@@ -29,6 +29,8 @@ These are the files it looks for:
 | Claude Desktop | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`; Linux: `~/.config/Claude/claude_desktop_config.json`; Windows: `%APPDATA%\Claude\claude_desktop_config.json` |
 | Claude Code | `~/.claude.json` (both the user-scoped servers and the project-local ones nested inside it), and `.mcp.json` in the current directory |
 | Cursor | `~/.cursor/mcp.json`, and `.cursor/mcp.json` in the current directory |
+| VS Code | macOS: `~/Library/Application Support/Code/User/mcp.json`; Linux: `~/.config/Code/User/mcp.json`; Windows: `%APPDATA%\Code\User\mcp.json`; and `.vscode/mcp.json` in the current directory |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 
 A host you don't have installed is simply skipped, not an error. Every scope is attributed to the host that owns it, so a server added with `claude mcp add --scope local` shows up under Claude Code just like the others.
 

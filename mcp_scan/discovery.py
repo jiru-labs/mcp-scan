@@ -3,7 +3,7 @@
 Discovery is strictly read-only: it resolves well-known paths and checks
 whether they exist. It never opens, parses or modifies a config file.
 
-Two hosts keep more than one config, and both places a server can hide are
+Several hosts keep more than one config, and every place a server can hide is
 discovered:
 
 * Claude Code keeps user-scoped servers in `~/.claude.json` and project-scoped
@@ -12,6 +12,19 @@ discovered:
   separate file, so it is the parser's to find, not discovery's.)
 * Cursor reads a global `~/.cursor/mcp.json` and a per-project `.cursor/mcp.json`
   in the directory it is opened on.
+* VS Code reads a global `mcp.json` from its user config directory (same
+  platform-specific-path problem as Claude Desktop) and a per-project
+  `.vscode/mcp.json`. Its top-level key is `servers`, not `mcpServers` — the
+  parser is taught to recognise that too, host by host, or discovering the
+  file would silently "clean-scan" it.
+* Windsurf reads a single global `~/.codeium/windsurf/mcp_config.json`; it has
+  no documented project-scoped config.
+
+Continue.dev is deliberately not covered here yet: its config.json nests
+servers under `experimental.modelContextProtocolServers` as a list, not a
+`mcpServers` map, and its documented direction is a YAML format the parser
+does not read at all — discovering it would need real parser work, not just a
+path (see the follow-up issue filed for #33).
 
 Every config is attributed to the host that owns it, whichever scope it came
 from.
@@ -25,6 +38,8 @@ from pathlib import Path
 HOST_CLAUDE_DESKTOP = "claude-desktop"
 HOST_CLAUDE_CODE = "claude-code"
 HOST_CURSOR = "cursor"
+HOST_VSCODE = "vscode"
+HOST_WINDSURF = "windsurf"
 
 # Host of a config the user pointed us at explicitly (`--config`): we know the
 # file, not the tool that owns it.
@@ -40,6 +55,17 @@ CLAUDE_DESKTOP_CONFIG_RELPATH_LINUX = Path(".config/Claude/claude_desktop_config
 CLAUDE_DESKTOP_CONFIG_RELPATH_WINDOWS = Path("Claude/claude_desktop_config.json")
 CLAUDE_CODE_CONFIG_RELPATH = Path(".claude.json")
 CURSOR_CONFIG_RELPATH = Path(".cursor/mcp.json")
+
+# VS Code's user-level config, same per-platform layout problem as Claude
+# Desktop (see vscode_config_path).
+VSCODE_CONFIG_RELPATH = Path("Library/Application Support/Code/User/mcp.json")
+VSCODE_CONFIG_RELPATH_LINUX = Path(".config/Code/User/mcp.json")
+# Relative to %APPDATA%, not to the home directory.
+VSCODE_CONFIG_RELPATH_WINDOWS = Path("Code/User/mcp.json")
+VSCODE_PROJECT_CONFIG_RELPATH = Path(".vscode/mcp.json")
+
+# Windsurf keeps one global config; no project-scoped file is documented.
+WINDSURF_CONFIG_RELPATH = Path(".codeium/windsurf/mcp_config.json")
 
 # Claude Code's project-scoped config, resolved against the project directory.
 CLAUDE_CODE_PROJECT_CONFIG_FILENAME = ".mcp.json"
@@ -160,6 +186,66 @@ def find_cursor_configs(
     ]
 
 
+def vscode_config_path(
+    home: Path | None = None,
+    *,
+    platform: str = sys.platform,
+    appdata: str | None = os.environ.get("APPDATA"),
+) -> Path:
+    """Where VS Code's user-level `mcp.json` lives on the running platform.
+
+    Same layout problem as Claude Desktop, so resolved the same way — see
+    `claude_desktop_config_path`.
+    """
+    base = home if home is not None else Path.home()
+    if platform == "win32":
+        appdata_dir = Path(appdata) if appdata is not None else base / "AppData" / "Roaming"
+        return appdata_dir / VSCODE_CONFIG_RELPATH_WINDOWS
+    if platform == "darwin":
+        return base / VSCODE_CONFIG_RELPATH
+    return base / VSCODE_CONFIG_RELPATH_LINUX
+
+
+def find_vscode_configs(
+    home: Path | None = None,
+    project_dir: Path | None = None,
+    *,
+    platform: str = sys.platform,
+    appdata: str | None = os.environ.get("APPDATA"),
+) -> list[ConfigLocation]:
+    """Locate every VS Code config: the user-level one and the project one.
+
+    Args:
+        home: Home directory to resolve the user-level config against.
+            Defaults to the current user's home.
+        project_dir: Directory holding a project-scoped `.vscode/mcp.json`.
+            Defaults to the current working directory.
+        platform: `sys.platform` value driving which user-level layout to
+            use. Defaults to the real platform; tests inject `"darwin"`,
+            `"linux"` or `"win32"` to stay deterministic.
+        appdata: Windows' `%APPDATA%`, only consulted when `platform` is
+            `"win32"`. Defaults to the real environment variable.
+    """
+    project = project_dir if project_dir is not None else Path.cwd()
+    user_path = vscode_config_path(home, platform=platform, appdata=appdata)
+
+    return [
+        _locate(HOST_VSCODE, user_path),
+        _locate(HOST_VSCODE, project / VSCODE_PROJECT_CONFIG_RELPATH),
+    ]
+
+
+def find_windsurf_config(home: Path | None = None) -> ConfigLocation:
+    """Locate Windsurf's global config.
+
+    Args:
+        home: Home directory holding `~/.codeium/windsurf/mcp_config.json`.
+            Defaults to the current user's home.
+    """
+    base = home if home is not None else Path.home()
+    return _locate(HOST_WINDSURF, base / WINDSURF_CONFIG_RELPATH)
+
+
 def find_all_configs(
     home: Path | None = None, project_dir: Path | None = None
 ) -> list[ConfigLocation]:
@@ -178,6 +264,8 @@ def find_all_configs(
             find_claude_desktop_config(home),
             *find_claude_code_configs(home, project_dir),
             *find_cursor_configs(home, project_dir),
+            *find_vscode_configs(home, project_dir),
+            find_windsurf_config(home),
         ]
     )
 

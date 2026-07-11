@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "vscode-project-tools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@example/vscode-project-mcp"],
+      "env": {
+        "PROJECT_TOOLS_API_KEY": "sk-FAKEfixtureVSCODEprojectKeyDoNotUse"
+      }
+    }
+  }
+}

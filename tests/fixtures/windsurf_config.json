@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "windsurf-tools": {
+      "command": "npx",
+      "args": ["-y", "@example/windsurf-mcp"],
+      "env": {
+        "WINDSURF_API_KEY": "sk-FAKEfixtureWINDSURFkeyDoNotUse"
+      }
+    }
+  }
+}

@@ -13,6 +13,11 @@ from mcp_scan.discovery import (
     HOST_CLAUDE_CODE,
     HOST_CURSOR,
     HOST_UNKNOWN,
+    HOST_VSCODE,
+    HOST_WINDSURF,
+    VSCODE_PROJECT_CONFIG_RELPATH,
+    WINDSURF_CONFIG_RELPATH,
+    vscode_config_path,
 )
 from mcp_scan.parsers import (
     TRANSPORT_REMOTE,
@@ -410,6 +415,58 @@ def test_parses_the_cursor_project_config(installed_hosts: InstalledHosts) -> No
     assert server.env_keys == ("PROJECT_TOOLS_API_KEY",)
 
 
+def test_parses_the_vscode_user_config(installed_hosts: InstalledHosts) -> None:
+    """VS Code's top-level `servers` key parses like `mcpServers` does elsewhere."""
+    path = vscode_config_path(
+        installed_hosts.home, appdata=str(installed_hosts.home / "AppData" / "Roaming")
+    )
+
+    result = parse_config_file(path, host=HOST_VSCODE)
+    server = next(s for s in result.servers if s.name == "vscode-search")
+
+    assert result.warnings == []
+    assert server.host == HOST_VSCODE
+    assert server.env_keys == ("SEARCH_API_KEY",)
+
+
+def test_parses_the_vscode_project_config(installed_hosts: InstalledHosts) -> None:
+    path = installed_hosts.project_dir / VSCODE_PROJECT_CONFIG_RELPATH
+
+    result = parse_config_file(path, host=HOST_VSCODE)
+    server = next(s for s in result.servers if s.name == "vscode-project-tools")
+
+    assert result.warnings == []
+    assert server.host == HOST_VSCODE
+    assert server.env_keys == ("PROJECT_TOOLS_API_KEY",)
+
+
+def test_a_servers_key_config_parses_empty_for_a_non_vscode_host(
+    installed_hosts: InstalledHosts,
+) -> None:
+    """A VS Code config read as another host finds nothing — the two hosts'
+    server keys (`servers` vs `mcpServers`) are deliberately not interchangeable,
+    so this must not silently succeed with the wrong host's servers."""
+    path = vscode_config_path(
+        installed_hosts.home, appdata=str(installed_hosts.home / "AppData" / "Roaming")
+    )
+
+    result = parse_config_file(path, host=HOST_CURSOR)
+
+    assert result.servers == []
+    assert result.warnings == []
+
+
+def test_parses_the_windsurf_config(installed_hosts: InstalledHosts) -> None:
+    path = installed_hosts.home / WINDSURF_CONFIG_RELPATH
+
+    result = parse_config_file(path, host=HOST_WINDSURF)
+    server = next(s for s in result.servers if s.name == "windsurf-tools")
+
+    assert result.warnings == []
+    assert server.host == HOST_WINDSURF
+    assert server.env_keys == ("WINDSURF_API_KEY",)
+
+
 def test_no_host_config_leaks_a_credential(installed_hosts: InstalledHosts) -> None:
     results = [
         parse_config_file(installed_hosts.home / CLAUDE_CODE_CONFIG_RELPATH),
@@ -417,6 +474,18 @@ def test_no_host_config_leaks_a_credential(installed_hosts: InstalledHosts) -> N
             installed_hosts.project_dir / CLAUDE_CODE_PROJECT_CONFIG_FILENAME
         ),
         parse_config_file(installed_hosts.home / CURSOR_CONFIG_RELPATH),
+        parse_config_file(
+            vscode_config_path(
+                installed_hosts.home,
+                appdata=str(installed_hosts.home / "AppData" / "Roaming"),
+            ),
+            host=HOST_VSCODE,
+        ),
+        parse_config_file(
+            installed_hosts.project_dir / VSCODE_PROJECT_CONFIG_RELPATH,
+            host=HOST_VSCODE,
+        ),
+        parse_config_file(installed_hosts.home / WINDSURF_CONFIG_RELPATH),
     ]
 
     parsed = repr(results)

@@ -12,7 +12,10 @@ from mcp_scan.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
     CURSOR_CONFIG_RELPATH,
+    VSCODE_PROJECT_CONFIG_RELPATH,
+    WINDSURF_CONFIG_RELPATH,
     claude_desktop_config_path,
+    vscode_config_path,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -91,7 +94,7 @@ def credentials_secrets(credentials_config: Path) -> list[str]:
 
 @dataclass(frozen=True)
 class InstalledHosts:
-    """A machine with Claude Desktop, Claude Code and Cursor configs in place.
+    """A machine with every supported host's configs in place.
 
     `secrets` are the env var values declared across all of them; none may ever
     surface in output.
@@ -104,7 +107,7 @@ class InstalledHosts:
 
 @pytest.fixture
 def installed_hosts(tmp_path: Path) -> InstalledHosts:
-    """Lay the three host formats out where discovery expects to find them."""
+    """Lay every host's config format out where discovery expects to find them."""
     home = tmp_path / "home"
     project_dir = tmp_path / "project"
 
@@ -112,13 +115,13 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
         # Wherever discovery would actually look on the platform running the
         # tests. `appdata` is pinned under `home`, not left at its real
         # `%APPDATA%` default, so that on an actual Windows machine this still
-        # lands inside tmp_path instead of a real Claude Desktop config
-        # directory. Any test that calls `find_all_configs()` or the CLI
-        # without also overriding `appdata` (all of them, below) still
-        # resolves the desktop config against the real `%APPDATA%` on
-        # Windows, not this fixture — hermetic coverage there would need
-        # `os.environ` monkeypatching too, out of scope while there is no
-        # Windows test runner.
+        # lands inside tmp_path instead of a real Claude Desktop / VS Code
+        # config directory. Any test that calls `find_all_configs()` or the
+        # CLI without also overriding `appdata` (all of them, below) still
+        # resolves those against the real `%APPDATA%` on Windows, not this
+        # fixture — hermetic coverage there would need `os.environ`
+        # monkeypatching too, out of scope while there is no Windows test
+        # runner.
         claude_desktop_config_path(
             home, appdata=str(home / "AppData" / "Roaming")
         ): "sample_config.json",
@@ -128,6 +131,11 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
         / CLAUDE_CODE_PROJECT_CONFIG_FILENAME: "claude_code_project_config.json",
         home / CURSOR_CONFIG_RELPATH: "cursor_config.json",
         project_dir / CURSOR_CONFIG_RELPATH: "cursor_project_config.json",
+        vscode_config_path(
+            home, appdata=str(home / "AppData" / "Roaming")
+        ): "vscode_config.json",
+        project_dir / VSCODE_PROJECT_CONFIG_RELPATH: "vscode_project_config.json",
+        home / WINDSURF_CONFIG_RELPATH: "windsurf_config.json",
     }
 
     secrets: list[str] = []
@@ -180,10 +188,11 @@ def _config_secrets(config: Path) -> list[str]:
 
 
 def _server_mappings(data: dict) -> list[dict]:
-    """Every `mcpServers` mapping in a config: the top-level one and each nested
-    under a Claude Code `projects[...]` entry."""
+    """Every servers mapping in a config: the top-level one (`mcpServers`, or
+    `servers` for VS Code) and each nested under a Claude Code `projects[...]`
+    entry."""
     mappings = []
-    top_level = data.get("mcpServers")
+    top_level = data.get("mcpServers") or data.get("servers")
     if isinstance(top_level, dict):
         mappings.append(top_level)
     for project in (data.get("projects") or {}).values():
