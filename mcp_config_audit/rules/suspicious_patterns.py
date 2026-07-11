@@ -44,9 +44,9 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
-from mcp_scan.credentials import redact_url
-from mcp_scan.parsers import MCPServer
-from mcp_scan.rules.base import Finding, Rule, Severity
+from mcp_config_audit.credentials import redact_url
+from mcp_config_audit.parsers import MCPServer
+from mcp_config_audit.rules.base import Finding, Rule, Severity
 
 #: A command that pulls something off the network. `fetch` is deliberately not
 #: in here: it is a word, and it is in the name of half the servers that fetch

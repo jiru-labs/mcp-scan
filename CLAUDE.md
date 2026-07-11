@@ -1,4 +1,4 @@
-# mcp-scan
+# mcp-config-audit
 
 ## What this project is
 
@@ -46,7 +46,7 @@ Philosophy: local-first, read-only by default, zero telemetry, clear and actiona
 ## Repo structure
 
 ```
-mcp_scan/
+mcp_config_audit/
   __init__.py
   cli.py          # Typer entrypoint
   discovery.py    # locate MCP config files per host
@@ -116,11 +116,62 @@ must not turn CI red); and no credential ever leaves the machine.
 ```bash
 pytest                  # run tests
 pip install -e ".[dev]" # install in development mode
-python -m mcp_scan      # run the CLI locally
+python -m mcp_config_audit      # run the CLI locally
 gh issue view N         # read issue N
 gh issue list           # list open issues
 ```
 
-## Project thesis (business context)
+## Project thesis (business context) — FALSIFIED 2026-07-12
 
-Existing MCP security tooling targets enterprise (thousands of €/month). The individual/small-team segment is empty. Expected catalyst: a mass security incident affecting individual agent users. Signal to accelerate: organic growth in stars/installs after publishing. Signal to archive: a large player ships an equivalent free scanner for this segment.
+The original thesis was: *existing MCP security tooling targets enterprise
+(thousands of €/month), the individual/small-team segment is empty, and the
+signal to archive is a large player shipping an equivalent free scanner.*
+
+**Every clause of that is now false. Read this section before proposing any
+feature work; the roadmap below it is on hold, not merely unfinished.**
+
+### What the market actually looks like
+
+The segment is not empty. It is crowded, and it is not converting.
+
+| Package | Its own pitch | Downloads/month |
+| --- | --- | --- |
+| `snyk-agent-scan` (was `invariantlabs-ai/mcp-scan`, ~2.8k stars) | 15+ risks, live tool-poisoning detection | **58,826** |
+| `mcp-scan` (redirect to the above) | — | 7,408 |
+| `mcpaudit` | 57+ rules, live scanner, SBOM, policy engine, OWASP Agentic Top 10 | **55** |
+| `mcp-inspect` | "Offline-first, CI-native MCP security scanner. No telemetry, no cloud API calls, ever" | — |
+| `mcp-config-guard` | "Zero-dependency security linter for MCP configurations" | — |
+| `mcp-config-check` | "Linter for MCP config files used by Claude Desktop, Cursor…" | — |
+| `mcp-guard`, `mcp-safe`, `mcp-lint`, `mcp-sentinel`, `mcp-recon`, `mcp-watchdog` | all MCP security/testing tools | — |
+
+Three conclusions, in order of how much they should hurt:
+
+1. **The differentiator is gone.** "Local-first, zero telemetry, config-only" is
+   already the shipped tagline of `mcp-inspect` and `mcp-config-guard`, close to
+   verbatim. It is not a wedge. Do not write it into a pitch as if it were one.
+2. **Features are not the constraint.** `mcpaudit` has 57 rules to this project's
+   9, plus live scanning and a policy engine, and gets **55 downloads a month.**
+   Shipping rule #10 changes nothing. Neither would `--live`.
+3. **Distribution is the constraint, and it is already won.** Snyk has ~99% of
+   the volume because Snyk has Snyk's distribution. The archive signal fired.
+
+### The decision (owner, 2026-07-12)
+
+**Finish the public polish, publish 0.1.0, and stop.** Keep it as a portfolio
+piece and a tool the owner actually uses. Do not spend further effort chasing
+adoption.
+
+Concretely, for any future session:
+
+- **Do not** start `--live` (#42), `--check-registry` (#36) or Continue.dev
+  (#37) on the assumption that they move the project forward. They do not. If
+  the owner asks for one anyway, build it — but do not propose it.
+- **Do** fix things that are wrong: Windows (#45) is a real defect, and the
+  README currently advertises a platform the tool has never run on.
+- The engineering judgement in here is the asset worth preserving — the exit-code
+  `3` "the result is unknown, go and look" semantics, narrowing the tool-poisoning
+  claim in #35 rather than overselling it, the redaction discipline. Do not
+  regress any of it for a feature nobody asked for.
+
+Revisit only if something changes the distribution picture, not the feature
+picture.

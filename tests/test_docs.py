@@ -1,6 +1,6 @@
 """Hold the documentation to what the code actually does.
 
-The README is the only description of `mcp-scan` most people will ever read, and
+The README is the only description of `mcp-config-audit` most people will ever read, and
 a security tool that overstates what it detects is worse than one that says
 nothing: the user stops looking for what it told them it had already checked.
 
@@ -19,7 +19,7 @@ import ast
 import re
 from pathlib import Path
 
-from mcp_scan.rules import load_rules
+from mcp_config_audit.rules import load_rules
 
 README = Path(__file__).parent.parent / "README.md"
 
@@ -56,7 +56,7 @@ def test_nothing_in_the_scanner_can_reach_the_network_or_start_a_process() -> No
     """The promise under both claims, held to the imports that would break it.
 
     A tool description only exists once a server is running, and a package only
-    resolves if you ask a registry — so `mcp-scan` cannot be reading either while
+    resolves if you ask a registry — so `mcp-config-audit` cannot be reading either while
     it has no way to open a socket or spawn a child. That is what makes "reads the
     configuration, not the servers" a fact about the code rather than a claim in a
     README, and it is what the READMEs's "never makes network calls while scanning"
@@ -87,7 +87,7 @@ def test_nothing_in_the_scanner_can_reach_the_network_or_start_a_process() -> No
     )
 
     offenders = {}
-    for source in (Path(__file__).parent.parent / "mcp_scan").rglob("*.py"):
+    for source in (Path(__file__).parent.parent / "mcp_config_audit").rglob("*.py"):
         imported = _imported_modules(ast.parse(source.read_text(encoding="utf-8")))
         reached = sorted(
             module

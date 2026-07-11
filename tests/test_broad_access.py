@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from mcp_scan.parsers import MCPServer, parse_config_file
-from mcp_scan.rules import Severity, run_rules
-from mcp_scan.rules.broad_access import BroadFilesystemAccess, UnrestrictedShellAccess
+from mcp_config_audit.parsers import MCPServer, parse_config_file
+from mcp_config_audit.rules import Severity, run_rules
+from mcp_config_audit.rules.broad_access import BroadFilesystemAccess, UnrestrictedShellAccess
 
 FILESYSTEM_SERVER = "@modelcontextprotocol/server-filesystem"
 

@@ -1,0 +1,61 @@
+name: Release
+
+# Publishes to PyPI when a version tag is pushed:
+#
+#     git tag v0.1.0 && git push origin v0.1.0
+#
+# There is no API token here, and none in the repository secrets. PyPI trusts
+# this workflow directly, over OIDC (a "trusted publisher"), so the credential
+# is minted for one run and expires with it. A token that does not exist cannot
+# leak — which is the same argument this project makes to its own users.
+#
+# Configure the trusted publisher once, at
+# https://pypi.org/manage/account/publishing/ :
+#
+#     PyPI project name: mcp-config-audit
+#     Owner:             jiru-labs
+#     Repository:        mcp-config-audit
+#     Workflow name:     release.yml
+#     Environment:       pypi
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build and check
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # the OIDC token PyPI verifies. Nothing else.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

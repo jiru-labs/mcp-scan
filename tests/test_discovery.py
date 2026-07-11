@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from conftest import InstalledHosts
 
-from mcp_scan.discovery import (
+from mcp_config_audit.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
     CLAUDE_DESKTOP_CONFIG_RELPATH,
@@ -77,6 +77,33 @@ def test_unreadable_parent_directory_does_not_raise(tmp_path: Path) -> None:
         assert location.exists is False
     finally:
         locked.chmod(0o755)
+
+
+def test_a_refused_probe_is_an_absent_config_on_every_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same guarantee as above, pinned where the OS cannot make it vacuous.
+
+    The `chmod(0o000)` test spent its life proving nothing on two thirds of the
+    supported matrix. `chmod` does not deny reads on Windows, and `is_file()`
+    only began swallowing `PermissionError` in Python 3.14 — so on 3.11-3.13 the
+    probe really did raise, and discovery really did crash, and the test above
+    was the thing that should have said so. It couldn't: it passes on the 3.14
+    we develop on, and there was no CI running the versions where it failed.
+
+    So state the contract against the error itself instead of against a file mode
+    the platform is free to ignore: whatever the interpreter does with a refused
+    stat, `_locate` reports an unreachable config as absent and never raises.
+    """
+
+    def refuse(self: Path, *args: object, **kwargs: object) -> bool:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "is_file", refuse)
+
+    location = find_claude_desktop_config(home=tmp_path, platform="darwin")
+
+    assert location.exists is False
 
 
 def test_defaults_to_real_home_when_no_home_given() -> None:

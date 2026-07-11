@@ -15,8 +15,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from types import ModuleType
 
-from mcp_scan.parsers import MCPServer
-from mcp_scan.rules.base import Finding, Rule, Severity
+from mcp_config_audit.parsers import MCPServer
+from mcp_config_audit.rules.base import Finding, Rule, Severity
 
 __all__ = [
     "Finding",

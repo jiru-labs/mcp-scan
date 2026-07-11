@@ -1,0 +1,52 @@
+name: Feature request
+description: A new detection rule, a new MCP host, an output format — anything the tool should do and doesn't.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What are you asking for?
+      options:
+        - A new detection rule
+        - Support for another MCP host
+        - Another output format, or a change to one
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the risk, or the gap?
+      description: >-
+        For a rule: what does the risky config look like, and what does an attacker
+        get out of it? For a host: which app, and where does it keep its config?
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: An example config, with any credentials faked
+      render: json
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: For a new rule — how bad is it?
+      description: >-
+        CRITICAL exits 2 and turns a CI run red; use it when the config is
+        exploitable as written. WARN is a real risk worth fixing. INFO is worth
+        knowing and never fails a build.
+      options:
+        - CRITICAL
+        - WARN
+        - INFO
+        - Not a rule / not sure
+
+  - type: markdown
+    attributes:
+      value: |
+        A rule is one file, and the engine discovers it automatically — if you'd
+        like to write it yourself, [CONTRIBUTING.md](https://github.com/jiru-labs/mcp-config-audit/blob/main/CONTRIBUTING.md)
+        shows the whole shape of one.

@@ -14,10 +14,10 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from mcp_scan import report
-from mcp_scan.parsers import MCPServer
-from mcp_scan.report import Report, UnknownFormat, WouldOverwriteConfig
-from mcp_scan.rules import Finding, Severity, load_rules
+from mcp_config_audit import report
+from mcp_config_audit.parsers import MCPServer
+from mcp_config_audit.report import Report, UnknownFormat, WouldOverwriteConfig
+from mcp_config_audit.rules import Finding, Severity, load_rules
 
 #: The width the findings have to be readable at. Not a round number chosen for
 #: neatness: it is the default terminal, and it is where the old table failed.
@@ -337,7 +337,7 @@ class TestJson:
         )
 
         assert document["schema_version"] == report.SCHEMA_VERSION
-        assert document["tool"]["name"] == "mcp-scan"
+        assert document["tool"]["name"] == "mcp-config-audit"
 
     def test_the_summary_carries_the_verdict(self) -> None:
         scanned = Report(
@@ -430,7 +430,7 @@ class TestSarif:
         assert document["$schema"] == report.SARIF_SCHEMA
 
         driver = document["runs"][0]["tool"]["driver"]
-        assert driver["name"] == "mcp-scan"
+        assert driver["name"] == "mcp-config-audit"
         assert driver["version"]
         assert driver["informationUri"]
 
@@ -753,7 +753,7 @@ class TestWrite:
         self, tmp_path: Path
     ) -> None:
         """`.sarif.json` is a special case, not a licence to misread `x.y.json`."""
-        path = tmp_path / "mcp-scan.2026-07-11.json"
+        path = tmp_path / "mcp-config-audit.2026-07-11.json"
 
         report.write(Report(servers=[_server()], findings=[_finding()]), path)
 
@@ -854,8 +854,8 @@ def _scan_of(config: Path) -> Report:
     the rules said about it is what a report would have to print, and that is
     the thing that must not contain a secret.
     """
-    from mcp_scan.parsers import parse_config_file
-    from mcp_scan.rules import run_rules
+    from mcp_config_audit.parsers import parse_config_file
+    from mcp_config_audit.rules import run_rules
 
     parsed = parse_config_file(config)
     result = run_rules(parsed.servers, load_rules())

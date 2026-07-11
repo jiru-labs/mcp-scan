@@ -88,11 +88,23 @@ class ConfigLocation:
 def _locate(host: str, path: Path) -> ConfigLocation:
     """Describe a candidate config path.
 
-    is_file() swallows OSError (permission denied, symlink loop) and returns
-    False, which is the behaviour we want: an unreachable config is absent,
-    not a crash.
+    An unreachable config is absent, not a crash: we probe paths inside
+    directories we may have no right to enter, and a home directory whose
+    permissions we cannot traverse must not take the scan down.
+
+    The `try` is not decoration. `Path.is_file()` does *not* reliably swallow the
+    error: through Python 3.13 it re-raises `PermissionError` (`_ignore_error`
+    covers `ENOENT`, `ENOTDIR`, `EBADF` and `ELOOP` — never `EACCES`), and only
+    3.14 began returning False for it. So the behaviour this function promises
+    held on the interpreter we develop on and nowhere else in the supported
+    range, which is precisely the kind of bug that only ever shows up on a user's
+    machine. Catch it here rather than inherit whichever pathlib is installed.
     """
-    return ConfigLocation(host=host, path=path, exists=path.is_file())
+    try:
+        exists = path.is_file()
+    except OSError:
+        exists = False
+    return ConfigLocation(host=host, path=path, exists=exists)
 
 
 def claude_desktop_config_path(
