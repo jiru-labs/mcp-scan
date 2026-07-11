@@ -14,7 +14,8 @@ Philosophy: local-first, read-only by default, zero telemetry, clear and actiona
   including local/project scopes (issues #14, #31) and VS Code and Windsurf
   (issue #38); risk detection (issues #6–#9); credential redaction
   (issues #16, #22); exportable report (issues #10, #19) in markdown, JSON and
-  SARIF (issue #34); exit-code hardening for CI (issues #9, #23, #27).
+  SARIF (issue #34), located at the line the server is declared on (issue #39);
+  exit-code hardening for CI (issues #9, #23, #27).
 - Open issues drift out of this list faster than it gets rewritten: run
   `gh issue list` rather than trusting the paragraph above. Open as of
   2026-07-11: #35, #36, #37, #39.

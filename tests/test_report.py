@@ -171,6 +171,22 @@ class TestTerminal:
 
         assert "evil [/bold]" in output
 
+    def test_the_heading_says_which_line_the_server_is_on(self) -> None:
+        """`path:line` is what a terminal opens at the line, not decoration."""
+        finding = _finding(server=_server(source="/etc/mcp.json", line=12))
+
+        output = _rendered(report.terminal(Report(findings=[finding])))
+
+        assert "/etc/mcp.json:12" in output
+
+    def test_the_heading_of_a_server_with_no_line_is_just_its_file(self) -> None:
+        finding = _finding(server=_server(source="/etc/mcp.json", line=None))
+
+        output = _rendered(report.terminal(Report(findings=[finding])))
+
+        assert "/etc/mcp.json" in output
+        assert "/etc/mcp.json:" not in output
+
 
 class TestMarkdown:
     """The shareable report: summary, findings, recommendations."""
@@ -200,6 +216,14 @@ class TestMarkdown:
         assert "| Severity | Rule | Server | Host | Finding |" in document
         assert "| --- | --- | --- | --- | --- |" in document
         assert "| CRITICAL | `static-credential-in-args` | `github` |" in document
+
+    def test_the_servers_table_says_which_line_each_server_is_on(self) -> None:
+        """A colleague reading the report should not have to search the config."""
+        document = report.to_markdown(
+            Report(servers=[_server(source="/etc/mcp.json", line=12)])
+        )
+
+        assert "`/etc/mcp.json:12`" in document
 
     def test_a_rule_is_recommended_once_however_many_servers_tripped_it(self) -> None:
         """Four findings from one rule are one thing to go and do."""
@@ -341,7 +365,9 @@ class TestJson:
         assert document["warnings"] == ["broken.json: malformed JSON"]
 
     def test_a_finding_carries_what_it_takes_to_act_on_it(self) -> None:
-        document = json.loads(report.to_json(Report(findings=[_finding()])))
+        document = json.loads(
+            report.to_json(Report(findings=[_finding(server=_server(line=12))]))
+        )
 
         finding = document["findings"][0]
         assert finding["rule"] == "static-credential-in-args"
@@ -352,7 +378,17 @@ class TestJson:
             "name": "github",
             "host": "claude-desktop",
             "source": "/home/dev/.claude.json",
+            "line": 12,
         }
+
+    def test_a_server_with_no_line_carries_a_null_rather_than_a_guess(self) -> None:
+        """A consumer that opens the file can tell "no line" from "line 1"."""
+        scanned = Report(servers=[_server(line=None)], findings=[_finding()])
+
+        document = json.loads(report.to_json(scanned))
+
+        assert document["servers"][0]["line"] is None
+        assert document["findings"][0]["server"]["line"] is None
 
     def test_it_never_writes_a_credential(
         self, credentials_config: Path, credentials_secrets: list[str]
@@ -484,6 +520,54 @@ class TestSarif:
         assert location["artifactLocation"]["uri"] == ".mcp.json"
         # GitHub will not display a result with no region at all.
         assert location["region"]["startLine"] == 1
+
+    def test_a_result_is_located_on_the_line_the_server_is_declared_on(self) -> None:
+        """The whole point of the region: the alert lands on the offending server.
+
+        A reviewer with four servers in one config should not have to go and find
+        which of them the alert is about.
+        """
+        finding = _finding(server=_server(line=12))
+
+        result = json.loads(report.to_sarif(Report(findings=[finding])))["runs"][0][
+            "results"
+        ][0]
+
+        region = result["locations"][0]["physicalLocation"]["region"]
+        assert region["startLine"] == 12
+
+    def test_a_server_with_no_line_still_produces_a_located_result(self) -> None:
+        """Line 1 as a fallback, because a result with no region is not displayed.
+
+        Dropping the region would drop the finding, which is the one thing a
+        scanner may not do.
+        """
+        finding = _finding(server=_server(line=None))
+
+        result = json.loads(report.to_sarif(Report(findings=[finding])))["runs"][0][
+            "results"
+        ][0]
+
+        region = result["locations"][0]["physicalLocation"]["region"]
+        assert region["startLine"] == 1
+
+    def test_the_fingerprint_does_not_move_when_the_server_does(self) -> None:
+        """A server pushed down the file is the same finding, not a new one.
+
+        Hashing the line would retire every alert on a config the moment somebody
+        added a server above them.
+        """
+        before = _finding(server=_server(line=12))
+        after = _finding(server=_server(line=40))
+
+        fingerprints = [
+            json.loads(report.to_sarif(Report(findings=[finding])))["runs"][0][
+                "results"
+            ][0]["partialFingerprints"]["mcpScanFinding/v1"]
+            for finding in (before, after)
+        ]
+
+        assert fingerprints[0] == fingerprints[1]
 
     def test_a_config_outside_the_repository_keeps_an_absolute_uri(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
