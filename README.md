@@ -26,7 +26,7 @@ These are the files it looks for:
 
 | Host | Config |
 | --- | --- |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Desktop | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`; Linux: `~/.config/Claude/claude_desktop_config.json`; Windows: `%APPDATA%\Claude\claude_desktop_config.json` |
 | Claude Code | `~/.claude.json` (both the user-scoped servers and the project-local ones nested inside it), and `.mcp.json` in the current directory |
 | Cursor | `~/.cursor/mcp.json`, and `.cursor/mcp.json` in the current directory |
 

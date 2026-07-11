@@ -17,6 +17,8 @@ Every config is attributed to the host that owns it, whichever scope it came
 from.
 """
 
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,11 +30,14 @@ HOST_CURSOR = "cursor"
 # file, not the tool that owns it.
 HOST_UNKNOWN = "unknown"
 
-# Paths relative to the user's home directory (macOS layout for Claude
-# Desktop; the others are the same on every platform).
+# Paths relative to the user's home directory (Claude Code and Cursor are the
+# same on every platform; Claude Desktop is not — see claude_desktop_config_path).
 CLAUDE_DESKTOP_CONFIG_RELPATH = Path(
     "Library/Application Support/Claude/claude_desktop_config.json"
 )
+CLAUDE_DESKTOP_CONFIG_RELPATH_LINUX = Path(".config/Claude/claude_desktop_config.json")
+# Relative to %APPDATA%, not to the home directory.
+CLAUDE_DESKTOP_CONFIG_RELPATH_WINDOWS = Path("Claude/claude_desktop_config.json")
 CLAUDE_CODE_CONFIG_RELPATH = Path(".claude.json")
 CURSOR_CONFIG_RELPATH = Path(".cursor/mcp.json")
 
@@ -64,15 +69,51 @@ def _locate(host: str, path: Path) -> ConfigLocation:
     return ConfigLocation(host=host, path=path, exists=path.is_file())
 
 
-def find_claude_desktop_config(home: Path | None = None) -> ConfigLocation:
+def claude_desktop_config_path(
+    home: Path | None = None,
+    *,
+    platform: str = sys.platform,
+    appdata: str | None = os.environ.get("APPDATA"),
+) -> Path:
+    """Where Claude Desktop's config lives on the running platform.
+
+    Windows resolves against `%APPDATA%`, falling back to `home/AppData/Roaming`
+    on the rare machine where the variable is unset. macOS and Linux resolve
+    against `home`, each at its own well-known path.
+
+    `appdata` defaults to the real `%APPDATA%`, captured once at import time
+    (mirroring `platform`'s default). Tests pass their own path, or `None` to
+    exercise the fallback, without needing to touch the environment.
+    """
+    base = home if home is not None else Path.home()
+    if platform == "win32":
+        appdata_dir = Path(appdata) if appdata is not None else base / "AppData" / "Roaming"
+        return appdata_dir / CLAUDE_DESKTOP_CONFIG_RELPATH_WINDOWS
+    if platform == "darwin":
+        return base / CLAUDE_DESKTOP_CONFIG_RELPATH
+    return base / CLAUDE_DESKTOP_CONFIG_RELPATH_LINUX
+
+
+def find_claude_desktop_config(
+    home: Path | None = None,
+    *,
+    platform: str = sys.platform,
+    appdata: str | None = os.environ.get("APPDATA"),
+) -> ConfigLocation:
     """Locate the Claude Desktop config file.
 
     Args:
         home: Home directory to resolve the config against. Defaults to the
             current user's home. Tests pass a tmp_path here.
+        platform: `sys.platform` value driving which layout to use. Defaults
+            to the real platform; tests inject `"darwin"`, `"linux"` or
+            `"win32"` to stay deterministic across the machines pytest runs on.
+        appdata: Windows' `%APPDATA%`, only consulted when `platform` is
+            `"win32"`. Defaults to the real environment variable; tests inject
+            a path instead of depending on it being set.
     """
-    base = home if home is not None else Path.home()
-    return _locate(HOST_CLAUDE_DESKTOP, base / CLAUDE_DESKTOP_CONFIG_RELPATH)
+    path = claude_desktop_config_path(home, platform=platform, appdata=appdata)
+    return _locate(HOST_CLAUDE_DESKTOP, path)
 
 
 def find_claude_code_configs(

@@ -9,11 +9,14 @@ from mcp_scan.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
     CLAUDE_DESKTOP_CONFIG_RELPATH,
+    CLAUDE_DESKTOP_CONFIG_RELPATH_LINUX,
+    CLAUDE_DESKTOP_CONFIG_RELPATH_WINDOWS,
     CURSOR_CONFIG_RELPATH,
     HOST_CLAUDE_CODE,
     HOST_CLAUDE_DESKTOP,
     HOST_CURSOR,
     ConfigLocation,
+    claude_desktop_config_path,
     find_all_configs,
     find_claude_code_configs,
     find_claude_desktop_config,
@@ -30,7 +33,7 @@ def _write_config(path: Path) -> Path:
 def test_finds_existing_claude_desktop_config(tmp_path: Path) -> None:
     expected = _write_config(tmp_path / CLAUDE_DESKTOP_CONFIG_RELPATH)
 
-    location = find_claude_desktop_config(home=tmp_path)
+    location = find_claude_desktop_config(home=tmp_path, platform="darwin")
 
     assert location.host == HOST_CLAUDE_DESKTOP
     assert location.path == expected
@@ -38,7 +41,7 @@ def test_finds_existing_claude_desktop_config(tmp_path: Path) -> None:
 
 
 def test_missing_config_does_not_raise(tmp_path: Path) -> None:
-    location = find_claude_desktop_config(home=tmp_path)
+    location = find_claude_desktop_config(home=tmp_path, platform="darwin")
 
     assert location.host == HOST_CLAUDE_DESKTOP
     assert location.exists is False
@@ -49,7 +52,7 @@ def test_path_pointing_at_a_directory_is_not_a_config(tmp_path: Path) -> None:
     # A directory sitting where the config should be is not a usable config.
     (tmp_path / CLAUDE_DESKTOP_CONFIG_RELPATH).mkdir(parents=True)
 
-    location = find_claude_desktop_config(home=tmp_path)
+    location = find_claude_desktop_config(home=tmp_path, platform="darwin")
 
     assert location.exists is False
 
@@ -60,7 +63,7 @@ def test_unreadable_parent_directory_does_not_raise(tmp_path: Path) -> None:
     locked.chmod(0o000)
 
     try:
-        location = find_claude_desktop_config(home=tmp_path)
+        location = find_claude_desktop_config(home=tmp_path, platform="darwin")
         assert location.exists is False
     finally:
         locked.chmod(0o755)
@@ -69,8 +72,48 @@ def test_unreadable_parent_directory_does_not_raise(tmp_path: Path) -> None:
 def test_defaults_to_real_home_when_no_home_given() -> None:
     location = find_claude_desktop_config()
 
-    assert location.path == Path.home() / CLAUDE_DESKTOP_CONFIG_RELPATH
+    # No OS asserted here: this checks that a missing `home` falls back to the
+    # real `Path.home()`, on whatever platform is actually running the test.
+    assert location.path == claude_desktop_config_path()
     assert isinstance(location.exists, bool)
+
+
+def test_finds_existing_claude_desktop_config_on_linux(tmp_path: Path) -> None:
+    expected = _write_config(tmp_path / CLAUDE_DESKTOP_CONFIG_RELPATH_LINUX)
+
+    location = find_claude_desktop_config(home=tmp_path, platform="linux")
+
+    assert location.host == HOST_CLAUDE_DESKTOP
+    assert location.path == expected
+    assert location.exists is True
+
+
+def test_finds_existing_claude_desktop_config_on_windows_with_appdata(
+    tmp_path: Path,
+) -> None:
+    appdata = tmp_path / "AppData" / "Roaming"
+    expected = _write_config(appdata / CLAUDE_DESKTOP_CONFIG_RELPATH_WINDOWS)
+
+    location = find_claude_desktop_config(
+        home=tmp_path, platform="win32", appdata=str(appdata)
+    )
+
+    assert location.host == HOST_CLAUDE_DESKTOP
+    assert location.path == expected
+    assert location.exists is True
+
+
+def test_windows_falls_back_to_home_appdata_roaming_when_appdata_unset(
+    tmp_path: Path,
+) -> None:
+    expected = _write_config(
+        tmp_path / "AppData" / "Roaming" / CLAUDE_DESKTOP_CONFIG_RELPATH_WINDOWS
+    )
+
+    location = find_claude_desktop_config(home=tmp_path, platform="win32", appdata=None)
+
+    assert location.path == expected
+    assert location.exists is True
 
 
 def test_finds_both_claude_code_configs(tmp_path: Path) -> None:

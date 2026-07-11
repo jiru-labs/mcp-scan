@@ -11,8 +11,8 @@ import pytest
 from mcp_scan.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
-    CLAUDE_DESKTOP_CONFIG_RELPATH,
     CURSOR_CONFIG_RELPATH,
+    claude_desktop_config_path,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -109,7 +109,19 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
     project_dir = tmp_path / "project"
 
     sources = {
-        home / CLAUDE_DESKTOP_CONFIG_RELPATH: "sample_config.json",
+        # Wherever discovery would actually look on the platform running the
+        # tests. `appdata` is pinned under `home`, not left at its real
+        # `%APPDATA%` default, so that on an actual Windows machine this still
+        # lands inside tmp_path instead of a real Claude Desktop config
+        # directory. Any test that calls `find_all_configs()` or the CLI
+        # without also overriding `appdata` (all of them, below) still
+        # resolves the desktop config against the real `%APPDATA%` on
+        # Windows, not this fixture — hermetic coverage there would need
+        # `os.environ` monkeypatching too, out of scope while there is no
+        # Windows test runner.
+        claude_desktop_config_path(
+            home, appdata=str(home / "AppData" / "Roaming")
+        ): "sample_config.json",
         # Carries a local-scope server nested under `projects[...]`, too.
         home / CLAUDE_CODE_CONFIG_RELPATH: "claude_code_config.json",
         project_dir
