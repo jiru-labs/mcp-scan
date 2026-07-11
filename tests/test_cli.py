@@ -670,6 +670,29 @@ class TestOutput:
         # The config is exactly as it was. This is the whole point.
         assert config.read_text(encoding="utf-8") == original
 
+    def test_it_refuses_even_when_the_config_declared_no_servers(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The real hazard: a `~/.claude.json` is mostly not an mcpServers block.
+
+        The scan reads such a file and parses zero servers from it, so a guard
+        that leaned on the parsed servers would find nothing to protect and write
+        the report straight over the user's startup state.
+        """
+        config = tmp_path / ".claude.json"
+        original = '{"numStartups": 42, "projects": {"/app": {}}, "userID": "keep"}'
+        config.write_text(original, encoding="utf-8")
+
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(config), "-o", str(config)]
+        )
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert not _crashed(result)
+        assert config.read_text(encoding="utf-8") == original
+
     def test_a_directory_that_does_not_exist_is_reported_not_raised(
         self, monkeypatch: pytest.MonkeyPatch, sample_config: Path, tmp_path: Path
     ) -> None:
@@ -713,6 +736,46 @@ class TestOutput:
             assert sample_secrets  # the fixture must actually carry secrets
             for secret in sample_secrets:
                 assert secret not in written, name
+
+    def test_the_report_masks_a_credential_a_rule_message_names(
+        self, tmp_path: Path
+    ) -> None:
+        """The nastiest case: a secret carried where a rule quotes it back.
+
+        A plaintext URL trips `insecure-transport`, whose message names the URL,
+        and a proxy server carries a password in a URL in its own args. Both are
+        printed and written, and neither may carry the secret to disk — with the
+        real rules, not a stand-in, since it is the rules doing the quoting.
+        """
+        password = "hunter2SuperSecret"
+        token = "sk-abcdef0123456789abcdef01"
+        config = tmp_path / "leaky.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "plain": {"url": f"http://u:{password}@evil.example.com/mcp?api_key={token}"},
+                        "proxy": {
+                            "command": "npx",
+                            "args": ["mcp-remote", f"https://u:{password}@host.example.com/sse"],
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        for name in ("report.md", "report.json"):
+            output = tmp_path / name
+
+            result = runner.invoke(
+                app, ["scan", "--config", str(config), "-o", str(output)]
+            )
+            assert not _crashed(result)
+
+            written = output.read_text(encoding="utf-8")
+            assert password not in written, name
+            assert token not in written, name
 
 
 class TestQuiet:

@@ -85,6 +85,14 @@ class Report:
     warnings: list[str] = field(default_factory=list)
     exit_code: int = 0
 
+    #: The config files this scan read, or tried to. Held apart from `servers`
+    #: because a config that parsed to nothing — malformed, empty, or simply
+    #: without an `mcpServers` block, which is most of a real `~/.claude.json` —
+    #: still contributes a path that `--output` must refuse to write over. A
+    #: guard built from `servers` would wave that file through and destroy it,
+    #: which is exactly the config a confused user is most likely to aim at.
+    sources: list[Path] = field(default_factory=list)
+
     @property
     def complete(self) -> bool:
         """True when the scan actually looked at everything it was pointed at.
@@ -288,8 +296,12 @@ def _refuse_to_overwrite_a_config(report: Report, path: Path) -> None:
     `.json` file, and the flag is one keystroke away from the path we just read
     it from. A scanner that eats the configuration it was pointed at is worse
     than no scanner, so this is refused before anything is opened for writing.
+
+    Checked against the files the scan *read*, not the servers it parsed out of
+    them — a config that yielded no servers is still a config, and overwriting it
+    is still destroying the user's file.
     """
-    scanned = {_resolved(server.source) for server in report.servers}
+    scanned = {_resolved(source) for source in report.sources}
     if _resolved(path) in scanned:
         raise WouldOverwriteConfig(
             f"refusing to write the report to '{path}': that is a config file "

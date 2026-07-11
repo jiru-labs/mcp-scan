@@ -44,6 +44,7 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
+from mcp_scan.credentials import redact_url
 from mcp_scan.parsers import MCPServer
 from mcp_scan.rules.base import Finding, Rule, Severity
 
@@ -187,9 +188,14 @@ class InsecureTransport(Rule):
         return [
             self.finding(
                 server,
-                f"the server is reached at '{url}', in the clear; anyone on the "
-                f"network path can read the traffic — credentials included — and "
-                f"rewrite the tool descriptions the agent acts on",
+                # The URL names the server for the user, but it may carry a
+                # password in `user:pass@` or a token in a query parameter — and
+                # this finding is a message, printed to the terminal and written
+                # into the report. It is masked like every other endpoint we
+                # show: the point is the scheme, not the secret riding on it.
+                f"the server is reached at '{redact_url(url)}', in the clear; "
+                f"anyone on the network path can read the traffic — credentials "
+                f"included — and rewrite the tool descriptions the agent acts on",
             )
             for url in _urls_of(server)
             if _is_plaintext(url)

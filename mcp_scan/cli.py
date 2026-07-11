@@ -145,6 +145,9 @@ def scan(
         findings=result.findings,
         warnings=warnings,
         exit_code=_exit_code(result.findings, warnings),
+        # Every file we tried to read, so --output can refuse to write over one
+        # even when it parsed to no servers at all.
+        sources=[location.path for location in locations],
     )
 
     if scanned.findings and not quiet:

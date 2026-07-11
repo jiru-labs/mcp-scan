@@ -422,7 +422,31 @@ class TestWrite:
         original = '{"mcpServers": {"github": {"command": "npx"}}}'
         config.write_text(original, encoding="utf-8")
 
-        scanned = Report(servers=[_server(source=str(config))])
+        scanned = Report(servers=[_server(source=str(config))], sources=[config])
+
+        with pytest.raises(WouldOverwriteConfig, match="config file"):
+            report.write(scanned, config)
+
+        assert config.read_text(encoding="utf-8") == original
+
+    def test_it_refuses_to_overwrite_a_config_that_yielded_no_servers(
+        self, tmp_path: Path
+    ) -> None:
+        """The dangerous case: the guard cannot lean on a parsed server.
+
+        A real `~/.claude.json` keeps startup counters and project state under
+        keys that are not `mcpServers`, so the scan reads it and parses zero
+        servers from it. A guard built from `servers` would find nothing to
+        protect and write the report straight over it. The file is still the
+        user's, and still theirs to keep.
+        """
+        config = tmp_path / ".claude.json"
+        original = '{"numStartups": 42, "userID": "keep-me"}'
+        config.write_text(original, encoding="utf-8")
+
+        # No servers — exactly what the parser returns for this file — but the
+        # path it was read from is still on the report.
+        scanned = Report(servers=[], sources=[config])
 
         with pytest.raises(WouldOverwriteConfig, match="config file"):
             report.write(scanned, config)
@@ -434,7 +458,7 @@ class TestWrite:
     ) -> None:
         config = tmp_path / ".claude.json"
         config.write_text("{}", encoding="utf-8")
-        scanned = Report(servers=[_server(source=str(config))])
+        scanned = Report(sources=[config])
 
         roundabout = tmp_path / "sub" / ".." / ".claude.json"
         (tmp_path / "sub").mkdir()
@@ -447,7 +471,7 @@ class TestWrite:
     ) -> None:
         config = tmp_path / ".claude.json"
         config.write_text("{}", encoding="utf-8")
-        scanned = Report(servers=[_server(source=str(config))])
+        scanned = Report(sources=[config])
 
         path = tmp_path / "report.json"
         report.write(scanned, path)
@@ -483,4 +507,5 @@ def _scan_of(config: Path) -> Report:
         servers=parsed.servers,
         findings=result.findings,
         warnings=parsed.warnings + result.warnings,
+        sources=[config],
     )
