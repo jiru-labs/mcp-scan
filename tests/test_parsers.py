@@ -269,6 +269,123 @@ def test_parses_the_claude_code_project_config(
     assert server.env_keys == ("DATABASE_URL",)
 
 
+def test_parses_claude_code_local_scope_servers(
+    installed_hosts: InstalledHosts,
+) -> None:
+    """Servers under `projects[...].mcpServers` are read and attributed too.
+
+    `--scope local` hides a server here rather than at the top level, and a
+    scanner that only read the top would miss it.
+    """
+    path = installed_hosts.home / CLAUDE_CODE_CONFIG_RELPATH
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+
+    names = [server.name for server in result.servers]
+    assert "linear" in names  # top-level, user scope
+    assert "local-scoped-db" in names  # nested, local scope
+
+    local = next(s for s in result.servers if s.name == "local-scoped-db")
+    assert result.warnings == []
+    assert local.host == HOST_CLAUDE_CODE
+    assert local.command == "uvx"
+    # The value is dropped like any other; only the key is kept.
+    assert local.env_keys == ("SQLITE_TOKEN",)
+
+
+def test_a_config_without_a_projects_key_parses_without_warnings(
+    tmp_path: Path,
+) -> None:
+    """Most configs have no local scope. Its absence is silence, not a warning."""
+    path = _write_config(
+        tmp_path / "no-projects.json",
+        {"mcpServers": {"top": {"command": "npx"}}},
+    )
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+
+    assert result.warnings == []
+    assert [server.name for server in result.servers] == ["top"]
+
+
+def test_a_config_that_is_only_a_local_scope_still_parses(tmp_path: Path) -> None:
+    """A `~/.claude.json` can carry local-scope servers and no top-level block."""
+    path = _write_config(
+        tmp_path / "only-local.json",
+        {
+            "numStartups": 1,
+            "projects": {
+                "/work/app": {"mcpServers": {"nested": {"command": "uvx"}}}
+            },
+        },
+    )
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+
+    assert result.warnings == []
+    assert [server.name for server in result.servers] == ["nested"]
+
+
+def test_stale_and_malformed_project_entries_are_skipped_in_silence(
+    tmp_path: Path,
+) -> None:
+    """The projects store accumulates cruft; it must not become a wall of warnings.
+
+    A project with no servers, one whose value is not an object, and one whose
+    `mcpServers` is the wrong type are all skipped without a word — only the one
+    well-formed local-scope server is read.
+    """
+    path = _write_config(
+        tmp_path / "messy.json",
+        {
+            "projects": {
+                "/a": {"allowedTools": []},  # no mcpServers
+                "/b": "not-an-object",  # value not a dict
+                "/c": {"mcpServers": "not-an-object"},  # mcpServers wrong type
+                "/d": {"mcpServers": {"good": {"command": "npx"}}},
+            }
+        },
+    )
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+
+    assert result.warnings == []
+    assert [server.name for server in result.servers] == ["good"]
+
+
+def test_a_projects_key_of_the_wrong_type_is_ignored(tmp_path: Path) -> None:
+    """`projects` that is not an object is not our shape; leave it be."""
+    path = _write_config(
+        tmp_path / "odd-projects.json",
+        {"mcpServers": {"top": {"command": "npx"}}, "projects": ["/a", "/b"]},
+    )
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+
+    assert result.warnings == []
+    assert [server.name for server in result.servers] == ["top"]
+
+
+def test_a_malformed_server_in_the_local_scope_is_still_reported(
+    tmp_path: Path,
+) -> None:
+    """A broken entry inside a real local scope is a check we could not run."""
+    path = _write_config(
+        tmp_path / "bad-local.json",
+        {
+            "projects": {
+                "/work": {"mcpServers": {"broken": "not-an-object"}}
+            }
+        },
+    )
+
+    result = parse_config_file(path, host=HOST_CLAUDE_CODE)
+
+    assert result.servers == []
+    assert len(result.warnings) == 1
+    assert "broken" in result.warnings[0]
+
+
 def test_parses_the_cursor_config(installed_hosts: InstalledHosts) -> None:
     path = installed_hosts.home / CURSOR_CONFIG_RELPATH
 
@@ -279,6 +396,18 @@ def test_parses_the_cursor_config(installed_hosts: InstalledHosts) -> None:
     assert server.host == HOST_CURSOR
     assert server.transport == TRANSPORT_REMOTE
     assert server.url == "https://search.example.com/mcp"
+
+
+def test_parses_the_cursor_project_config(installed_hosts: InstalledHosts) -> None:
+    """Cursor's per-project `.cursor/mcp.json` parses like any other config."""
+    path = installed_hosts.project_dir / CURSOR_CONFIG_RELPATH
+
+    result = parse_config_file(path, host=HOST_CURSOR)
+    server = next(s for s in result.servers if s.name == "cursor-project-tools")
+
+    assert result.warnings == []
+    assert server.host == HOST_CURSOR
+    assert server.env_keys == ("PROJECT_TOOLS_API_KEY",)
 
 
 def test_no_host_config_leaks_a_credential(installed_hosts: InstalledHosts) -> None:

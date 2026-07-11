@@ -10,9 +10,11 @@ Philosophy: local-first, read-only by default, zero telemetry, clear and actiona
 
 ## Status and roadmap
 
-- Current phase: MVP — reading and listing configs (issues #1–#5)
-- Next: risk detection (issues #6–#9)
-- After that: exportable report (issue #10)
+- Done: reading and listing configs (issues #1–#5), across every host scope
+  (issue #14); risk detection (issues #6–#9).
+- In progress: exportable report (issue #10), and exit-code hardening for CI
+  (issues #23, #27).
+- Next: see the open issues.
 
 ## Tech stack
 

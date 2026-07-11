@@ -17,7 +17,7 @@ from mcp_scan.discovery import (
     find_all_configs,
     find_claude_code_configs,
     find_claude_desktop_config,
-    find_cursor_config,
+    find_cursor_configs,
 )
 
 
@@ -106,21 +106,48 @@ def test_claude_code_project_config_defaults_to_the_working_directory(
     assert project.exists is True
 
 
-def test_finds_existing_cursor_config(tmp_path: Path) -> None:
+def test_finds_the_global_cursor_config(tmp_path: Path) -> None:
     expected = _write_config(tmp_path / CURSOR_CONFIG_RELPATH)
 
-    location = find_cursor_config(home=tmp_path)
+    global_config, _ = find_cursor_configs(home=tmp_path, project_dir=tmp_path / "elsewhere")
 
-    assert location.host == HOST_CURSOR
-    assert location.path == expected
-    assert location.exists is True
+    assert global_config.host == HOST_CURSOR
+    assert global_config.path == expected
+    assert global_config.exists is True
 
 
-def test_missing_cursor_config_does_not_raise(tmp_path: Path) -> None:
-    location = find_cursor_config(home=tmp_path)
+def test_finds_the_project_cursor_config(tmp_path: Path) -> None:
+    """Cursor reads a `.cursor/mcp.json` from the project directory too."""
+    project = tmp_path / "project"
+    expected = _write_config(project / CURSOR_CONFIG_RELPATH)
 
-    assert location.host == HOST_CURSOR
-    assert location.exists is False
+    _, project_config = find_cursor_configs(home=tmp_path / "home", project_dir=project)
+
+    assert project_config.host == HOST_CURSOR
+    assert project_config.path == expected
+    assert project_config.exists is True
+
+
+def test_project_cursor_config_defaults_to_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    expected = _write_config(tmp_path / CURSOR_CONFIG_RELPATH)
+
+    _, project_config = find_cursor_configs(home=tmp_path / "home")
+
+    assert project_config.path == expected
+    assert project_config.exists is True
+
+
+def test_missing_cursor_configs_do_not_raise(tmp_path: Path) -> None:
+    global_config, project_config = find_cursor_configs(
+        home=tmp_path / "home", project_dir=tmp_path / "project"
+    )
+
+    assert global_config.host == HOST_CURSOR
+    assert global_config.exists is False
+    assert project_config.exists is False
 
 
 def test_find_all_configs_covers_every_host(installed_hosts: InstalledHosts) -> None:
@@ -130,18 +157,38 @@ def test_find_all_configs_covers_every_host(installed_hosts: InstalledHosts) -> 
 
     assert [location.host for location in locations] == [
         HOST_CLAUDE_DESKTOP,
-        HOST_CLAUDE_CODE,
-        HOST_CLAUDE_CODE,
-        HOST_CURSOR,
+        HOST_CLAUDE_CODE,  # user scope
+        HOST_CLAUDE_CODE,  # project scope
+        HOST_CURSOR,  # global
+        HOST_CURSOR,  # project
     ]
     assert all(location.exists for location in locations)
 
 
 def test_find_all_configs_reports_uninstalled_hosts(tmp_path: Path) -> None:
     # Nothing installed: every host still gets a candidate, all absent, so a
-    # caller can tell "not installed" from "installed but empty".
-    locations = find_all_configs(home=tmp_path, project_dir=tmp_path)
+    # caller can tell "not installed" from "installed but empty". Home and
+    # project are distinct here, so each host's scopes stay distinct too.
+    locations = find_all_configs(
+        home=tmp_path / "home", project_dir=tmp_path / "project"
+    )
 
-    assert len(locations) == 4
+    assert len(locations) == 5
     assert not any(location.exists for location in locations)
     assert all(isinstance(location, ConfigLocation) for location in locations)
+
+
+def test_find_all_configs_deduplicates_a_config_reached_two_ways(
+    tmp_path: Path,
+) -> None:
+    """Run from home, Cursor's global and project paths are the same file.
+
+    It must appear once — scanned once, and its findings counted once — not
+    twice because two scopes happen to point at it.
+    """
+    _write_config(tmp_path / CURSOR_CONFIG_RELPATH)
+
+    locations = find_all_configs(home=tmp_path, project_dir=tmp_path)
+
+    cursor_paths = [loc.path for loc in locations if loc.host == HOST_CURSOR]
+    assert len(cursor_paths) == 1

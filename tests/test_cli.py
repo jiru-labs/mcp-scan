@@ -220,11 +220,13 @@ def test_list_shows_servers_from_every_installed_host(
     result = runner.invoke(app, ["list"])
 
     assert result.exit_code == 0
-    # One server from each of the four configs.
+    # A server from every scope of every host, including the two #14 added.
     assert "filesystem" in result.stdout  # Claude Desktop
     assert "linear" in result.stdout  # Claude Code, user scope
+    assert "local-scoped-db" in result.stdout  # Claude Code, local scope
     assert "project-db" in result.stdout  # Claude Code, project scope
-    assert "cursor-search" in result.stdout  # Cursor
+    assert "cursor-search" in result.stdout  # Cursor, global
+    assert "cursor-project-tools" in result.stdout  # Cursor, project scope
 
 
 def test_list_groups_servers_under_the_host_that_declares_them(

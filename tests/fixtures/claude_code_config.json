@@ -9,5 +9,22 @@
         "LINEAR_API_KEY": "lin_api_FAKEfixtureKEYdoNotUse"
       }
     }
+  },
+  "projects": {
+    "/home/demo/work/app": {
+      "allowedTools": [],
+      "mcpServers": {
+        "local-scoped-db": {
+          "command": "uvx",
+          "args": ["mcp-server-sqlite", "--db", "./app.db"],
+          "env": {
+            "SQLITE_TOKEN": "sk-FAKEfixtureLOCALscopeKeyDoNotUse"
+          }
+        }
+      }
+    },
+    "/home/demo/work/other": {
+      "allowedTools": []
+    }
   }
 }

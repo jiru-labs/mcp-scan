@@ -5,6 +5,11 @@ servers under a top-level `mcpServers` object, so a single parser covers
 them. A server is either local (`command` + `args`, stdio transport) or
 remote (`url`).
 
+Claude Code adds one twist: servers added with `--scope local` live inside the
+same `~/.claude.json`, nested under `projects["<path>"].mcpServers` rather than
+at the top level. Those are read too — a credentialed server hides there just
+as well — and attributed to the same host as the top-level ones.
+
 Environment variables are recorded by KEY ONLY. Their values are secrets and
 never leave this module: they are not stored on the model, logged, or shown.
 
@@ -21,6 +26,13 @@ from mcp_scan.credentials import is_env_reference, redact_args, redact_url
 from mcp_scan.discovery import HOST_UNKNOWN
 
 SERVERS_KEY = "mcpServers"
+
+#: Claude Code's local scope. Servers added with `claude mcp add --scope local`
+#: are stored in `~/.claude.json` under `projects["<path>"].mcpServers`, not at
+#: the top level — a place a credentialed server can hide from a scanner that
+#: only reads the top. Absent for every other host and for a fresh config, so
+#: its absence is silent.
+PROJECTS_KEY = "projects"
 
 TRANSPORT_STDIO = "stdio"
 TRANSPORT_REMOTE = "remote"
@@ -134,14 +146,23 @@ def parse_config_file(path: Path, host: str = HOST_UNKNOWN) -> ParseResult:
         return result
 
     servers = data.get(SERVERS_KEY)
-    if servers is None:
-        # A config with no servers at all is valid — nothing to scan, nothing
-        # to warn about.
-        return result
-    if not isinstance(servers, dict):
-        result.warnings.append(f"{path}: '{SERVERS_KEY}' is not a JSON object")
-        return result
+    if servers is not None:
+        if isinstance(servers, dict):
+            _add_servers(servers, path, host, result)
+        else:
+            # A config with no top-level servers at all is valid and silent; one
+            # whose `mcpServers` is the wrong type is a mistake worth flagging.
+            result.warnings.append(f"{path}: '{SERVERS_KEY}' is not a JSON object")
 
+    _add_local_scope_servers(data, path, host, result)
+
+    return result
+
+
+def _add_servers(
+    servers: dict, path: Path, host: str, result: ParseResult
+) -> None:
+    """Build a server from each entry of one `mcpServers` mapping."""
     for name, definition in servers.items():
         if not isinstance(definition, dict):
             result.warnings.append(
@@ -150,7 +171,25 @@ def parse_config_file(path: Path, host: str = HOST_UNKNOWN) -> ParseResult:
             continue
         result.servers.append(_build_server(name, definition, path, host))
 
-    return result
+
+def _add_local_scope_servers(
+    data: dict, path: Path, host: str, result: ParseResult
+) -> None:
+    """Read Claude Code's local-scope servers, nested under `projects`.
+
+    Best-effort by design: this store accumulates an entry for every project the
+    user has ever opened, and a stale or hand-edited one that is not the shape we
+    expect is skipped in silence rather than turned into a warning per project.
+    A malformed *server* inside a well-formed project's `mcpServers` is still
+    reported, exactly as one at the top level would be.
+    """
+    projects = data.get(PROJECTS_KEY)
+    if not isinstance(projects, dict):
+        return
+
+    for project in projects.values():
+        if isinstance(project, dict) and isinstance(project.get(SERVERS_KEY), dict):
+            _add_servers(project[SERVERS_KEY], path, host, result)
 
 
 def _build_server(name: str, definition: dict, source: Path, host: str) -> MCPServer:

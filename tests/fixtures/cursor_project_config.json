@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cursor-project-tools": {
+      "command": "npx",
+      "args": ["-y", "@example/cursor-project-mcp"],
+      "env": {
+        "PROJECT_TOOLS_API_KEY": "sk-FAKEfixtureCURSORprojectKeyDoNotUse"
+      }
+    }
+  }
+}

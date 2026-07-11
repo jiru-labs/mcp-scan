@@ -110,10 +110,12 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
 
     sources = {
         home / CLAUDE_DESKTOP_CONFIG_RELPATH: "sample_config.json",
+        # Carries a local-scope server nested under `projects[...]`, too.
         home / CLAUDE_CODE_CONFIG_RELPATH: "claude_code_config.json",
         project_dir
         / CLAUDE_CODE_PROJECT_CONFIG_FILENAME: "claude_code_project_config.json",
         home / CURSOR_CONFIG_RELPATH: "cursor_config.json",
+        project_dir / CURSOR_CONFIG_RELPATH: "cursor_project_config.json",
     }
 
     secrets: list[str] = []
@@ -139,18 +141,20 @@ def _config_secrets(config: Path) -> list[str]:
     That is every `env` value, the value half of any `--flag=value` argument,
     and any credential-bearing query parameter of a remote server's URL — the
     three places a config can pin a secret, and the three a report must never
-    echo.
+    echo. Walked across the top-level servers *and* Claude Code's local scope,
+    nested under `projects[...]`, so a secret hiding there is checked too.
     """
     data = json.loads(config.read_text(encoding="utf-8"))
 
     secrets: list[str] = []
-    for server in data["mcpServers"].values():
-        secrets.extend(str(value) for value in server.get("env", {}).values())
-        for arg in server.get("args", []):
-            _, separator, value = str(arg).partition("=")
-            if separator:
-                secrets.append(value)
-        secrets.extend(SECRET_QUERY_PARAM.findall(str(server.get("url", ""))))
+    for servers in _server_mappings(data):
+        for server in servers.values():
+            secrets.extend(str(value) for value in server.get("env", {}).values())
+            for arg in server.get("args", []):
+                _, separator, value = str(arg).partition("=")
+                if separator:
+                    secrets.append(value)
+            secrets.extend(SECRET_QUERY_PARAM.findall(str(server.get("url", ""))))
 
     # A `$…` value references the environment and pins nothing: it is the fix,
     # not the leak, and it is meant to be printed. An empty value is a substring
@@ -161,3 +165,16 @@ def _config_secrets(config: Path) -> list[str]:
         for secret in secrets
         if secret and not secret.strip().startswith("$")
     ]
+
+
+def _server_mappings(data: dict) -> list[dict]:
+    """Every `mcpServers` mapping in a config: the top-level one and each nested
+    under a Claude Code `projects[...]` entry."""
+    mappings = []
+    top_level = data.get("mcpServers")
+    if isinstance(top_level, dict):
+        mappings.append(top_level)
+    for project in (data.get("projects") or {}).values():
+        if isinstance(project, dict) and isinstance(project.get("mcpServers"), dict):
+            mappings.append(project["mcpServers"])
+    return mappings
