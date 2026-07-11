@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability in mcp-audit
+    url: https://github.com/jiru-labs/mcp-audit/security/advisories/new
+    about: >-
+      A flaw in the scanner itself — a leaked credential value, a network call in
+      the default scan, a write outside --output. Report it privately, never as a
+      public issue. See SECURITY.md.
+  - name: Ask a question
+    url: https://github.com/jiru-labs/mcp-audit/discussions
+    about: Not sure whether something is a bug? Ask here first.

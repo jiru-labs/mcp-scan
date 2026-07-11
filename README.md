@@ -1,5 +1,9 @@
 # mcp-audit
 
+[![CI](https://github.com/jiru-labs/mcp-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/jiru-labs/mcp-audit/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Security scanner for local MCP (Model Context Protocol) configurations.
 
 `mcp-audit` reads the MCP config files on your machine — Claude Desktop, Claude Code, Cursor, VS Code, Windsurf — and reports what the configuration itself gives away: credentials written into it in plain text, servers reached in the clear, launch commands that download and run remote code or resolve a package name anyone could claim, and servers handed a whole filesystem or an unrestricted shell.
@@ -13,8 +17,11 @@ It is built for individual developers and small teams who don't have enterprise 
 ## Install
 
 ```bash
-pipx install mcp-audit
+pipx install git+https://github.com/jiru-labs/mcp-audit
 ```
+
+There is no PyPI release yet, so install from source for now. Once `0.1.0` is
+published, `pipx install mcp-audit` is all it takes.
 
 ## Usage
 
@@ -186,6 +193,18 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## Contributing
+
+Bug reports, false positives, missing hosts and new rules are all welcome — and
+a new rule is genuinely one file, which the engine discovers on its own.
+[CONTRIBUTING.md](CONTRIBUTING.md) shows the shape of one and the four things it
+has to respect.
+
+Found a security problem **in the scanner itself** — a credential value that
+leaked into the output, a network call in the default scan? Don't open a public
+issue. [SECURITY.md](SECURITY.md) says how to report it privately, and spells
+out the promises the tool is held to.
+
 ## License
 
-MIT
+[MIT](LICENSE).

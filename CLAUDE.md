@@ -124,3 +124,29 @@ gh issue list           # list open issues
 ## Project thesis (business context)
 
 Existing MCP security tooling targets enterprise (thousands of €/month). The individual/small-team segment is empty. Expected catalyst: a mass security incident affecting individual agent users. Signal to accelerate: organic growth in stars/installs after publishing. Signal to archive: a large player ships an equivalent free scanner for this segment.
+
+### The competitor, and why this still exists (2026-07-12)
+
+The archive signal above is **partially tripped**, and the project should be
+honest about it. `invariantlabs-ai/mcp-scan` (~2.8k stars, Apache-2.0) was
+acquired by Snyk and is now `snyk-agent-scan`. It scans the same hosts, claims
+15+ risks including the live tool-poisoning detection this project only has as
+issue #42, and it is free to use.
+
+Two things kept the project alive rather than archived:
+
+1. **It owns the name.** PyPI `mcp-scan` is theirs, which is why this project is
+   now `mcp-audit` (renamed 2026-07-12). Do not reintroduce the old name.
+2. **It phones home.** `snyk-agent-scan` requires a Snyk API token, sends
+   component metadata — tool names and descriptions — to Snyk's servers, and
+   fingerprints the machine on startup unless you pass `--no-bootstrap`.
+
+So the wedge is no longer "free vs enterprise pricing" — that one is gone. It is
+**"runs on your machine and tells no one" vs "a security scanner that needs an
+account and uploads your config".** Every feature decision should widen that gap,
+not narrow it: this is the deep reason the network-call policy above is not a
+nicety but the product. A `--live` mode (issue #42) must therefore launch the
+servers *locally* and never ship a description off-box — the moment it does, this
+project is a worse Snyk with fewer engineers.
+
+Revisit archiving if Snyk ships a no-account, no-telemetry local mode.
