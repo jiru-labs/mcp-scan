@@ -1,5 +1,6 @@
 """Tests for the CLI entrypoint."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ runner = CliRunner()
 EXIT_CLEAN = 0
 EXIT_WARN = 1
 EXIT_CRITICAL = 2
+EXIT_INCOMPLETE = 3
 
 
 def _crashed(result: Result) -> bool:
@@ -445,6 +447,139 @@ class TestExitCodes:
         assert result.exit_code == EXIT_CLEAN
 
 
+class TestIncompleteScan:
+    """Exit 3: the scan did not complete, so it has no verdict to give.
+
+    The failure a security scanner cannot have is passing green over a config it
+    never managed to read. Codes 0, 1 and 2 all assert complete coverage — "I
+    checked everything, and the worst of it was X" — so a run that skipped part
+    of the config may return none of them, however clean the part it did read.
+    """
+
+    def test_a_config_that_could_not_be_read_exits_3_rather_than_clean(
+        self, monkeypatch: pytest.MonkeyPatch, malformed_config: Path
+    ) -> None:
+        """The bug this code exists for: no findings, because nothing was read."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(malformed_config)])
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert "malformed JSON" in result.stdout
+
+    def test_a_config_that_does_not_exist_exits_3(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Asked to scan a named file, we either scan it or say we could not."""
+        _pretend_rules_are(monkeypatch, FlagsNothing())
+
+        result = runner.invoke(app, ["scan", "--config", str(tmp_path / "gone.json")])
+
+        assert result.exit_code == EXIT_INCOMPLETE
+
+    def test_a_config_we_lack_permission_to_open_exits_3(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        unreadable = tmp_path / "unreadable.json"
+        unreadable.write_text('{"mcpServers": {}}', encoding="utf-8")
+        unreadable.chmod(0o000)
+        if os.access(unreadable, os.R_OK):  # pragma: no cover — root ignores the mode
+            pytest.skip("running as root: the mode bits do not deny us the read")
+
+        _pretend_rules_are(monkeypatch, FlagsNothing())
+
+        result = runner.invoke(app, ["scan", "--config", str(unreadable)])
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert not _crashed(result)
+
+    def test_a_broken_rule_exits_3(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        """A rule that crashed is a check that did not run."""
+        _pretend_rules_are(monkeypatch, BrokenRule(), FlagsNothing())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert not _crashed(result)
+
+    def test_an_incomplete_scan_outranks_a_critical_finding(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        """A CRITICAL is a verdict, and this run is not entitled to one.
+
+        Both codes fail a build, so nothing is missed by choosing 3 — and the
+        critical is still printed in full. What the exit code must not do is
+        claim the run knows the worst of the config when a rule it needed never
+        ran.
+        """
+        _pretend_rules_are(monkeypatch, BrokenRule(), FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+        assert result.exit_code == EXIT_INCOMPLETE
+        assert result.exit_code != EXIT_CRITICAL
+        # Stepping back from a verdict is not the same as going quiet.
+        assert "CRITICAL" in result.stdout
+        assert "filesystem was flagged" in result.stdout
+
+    def test_it_says_out_loud_that_the_scan_did_not_complete(
+        self, monkeypatch: pytest.MonkeyPatch, malformed_config: Path
+    ) -> None:
+        """The summary line counts findings; it cannot count what was never read."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan", "--config", str(malformed_config)])
+
+        assert "Scan incomplete: 1 warning" in result.stdout
+
+    def test_the_exit_code_survives_quiet(
+        self, monkeypatch: pytest.MonkeyPatch, malformed_config: Path
+    ) -> None:
+        """The case from the issue, verbatim: `scan --config broken.json -q`."""
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(
+            app, ["scan", "--config", str(malformed_config), "--quiet"]
+        )
+
+        assert result.exit_code == EXIT_INCOMPLETE
+
+    def test_a_scan_that_completed_keeps_the_codes_it_promised(
+        self, monkeypatch: pytest.MonkeyPatch, sample_config: Path
+    ) -> None:
+        """Nothing above changes what a healthy run returns."""
+        for rule, expected in (
+            (FlagsNothing(), EXIT_CLEAN),
+            (WarnsOnEveryServer(), EXIT_WARN),
+            (FlagsEveryServer(), EXIT_CRITICAL),
+        ):
+            _pretend_rules_are(monkeypatch, rule)
+
+            result = runner.invoke(app, ["scan", "--config", str(sample_config)])
+
+            assert result.exit_code == expected, rule.id
+            assert "Scan incomplete" not in result.stdout, rule.id
+
+    def test_a_host_that_is_simply_not_installed_is_not_an_incomplete_scan(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Nothing to scan is a complete scan of nothing. Only 0 is honest here.
+
+        Discovery skips a host whose config does not exist, so no warning is
+        raised and no coverage is lost — unlike `--config missing.json`, where
+        the user named a file we then failed to read.
+        """
+        _pretend_only_claude_desktop_config_at(monkeypatch, tmp_path / "missing.json")
+        _pretend_rules_are(monkeypatch, FlagsEveryServer())
+
+        result = runner.invoke(app, ["scan"])
+
+        assert result.exit_code == EXIT_CLEAN
+        assert "No MCP config files found." in result.stdout
+
+
 class TestQuiet:
     """`--quiet`: the summary line, and whatever the run failed to look at."""
 
@@ -487,8 +622,9 @@ class TestQuiet:
         """The one thing --quiet must not swallow.
 
         A warning does not report a risk, it reports that we failed to look for
-        one. Silenced here, a broken config would sail through CI as a clean
-        scan — the exit code cannot say it, so the line must.
+        one. The exit code now says so too (3, see `TestIncompleteScan`), but a
+        code says only *that* the scan fell short — the line says which file, and
+        where in it, which is what the person fixing it needs.
         """
         _pretend_rules_are(monkeypatch, FlagsEveryServer())
 
@@ -496,6 +632,7 @@ class TestQuiet:
             app, ["scan", "--config", str(malformed_config), "--quiet"]
         )
 
+        assert result.exit_code == EXIT_INCOMPLETE
         assert "malformed JSON" in result.stdout
 
     def test_the_summary_is_printed_with_the_table_too(
@@ -547,8 +684,8 @@ def test_scan_warns_on_malformed_config_without_crashing(
 
     result = runner.invoke(app, ["scan", "--config", str(malformed_config)])
 
-    assert result.exit_code == 0
-    assert result.exception is None
+    assert result.exit_code == EXIT_INCOMPLETE
+    assert not _crashed(result)
     assert "malformed JSON" in result.stdout
 
 
@@ -559,10 +696,11 @@ def test_scan_warns_about_a_broken_rule_and_keeps_scanning(
 
     result = runner.invoke(app, ["scan", "--config", str(sample_config)])
 
-    assert result.exit_code == EXIT_CRITICAL
+    assert result.exit_code == EXIT_INCOMPLETE
     assert not _crashed(result)
     assert "test-broken" in result.stdout
-    # The healthy rule still reported.
+    # The healthy rule still reported, and its findings are still printed: the
+    # exit code steps back from a verdict, the output does not go quiet.
     assert "filesystem was flagged" in result.stdout
 
 

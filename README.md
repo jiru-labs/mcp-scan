@@ -58,6 +58,7 @@ Every detection rule runs against every server found, and the findings are repor
 | `0` | Nothing worse than an `INFO` finding. An `INFO` is worth telling you about, not worth failing your build over. |
 | `1` | The worst finding is a `WARN`. |
 | `2` | A `CRITICAL` was found. |
+| `3` | The scan did not complete, so it has no verdict to give. |
 
 So a pipeline can gate on the verdict without reading a word of the output:
 
@@ -65,7 +66,9 @@ So a pipeline can gate on the verdict without reading a word of the output:
 mcp-scan scan --quiet || echo "MCP config needs attention"
 ```
 
-`--quiet` (`-q`) drops the findings table and prints the summary line alone. It does *not* silence warnings — a config that could not be parsed, or a rule that crashed, still says so. A warning is not a risk it found; it is a risk it failed to look for, and that is the last thing a CI run should swallow.
+`--quiet` (`-q`) drops the findings and prints the summary line alone. It does *not* silence warnings — a config that could not be parsed, or a rule that crashed, still says so. A warning is not a risk it found; it is a risk it failed to look for, and that is the last thing a CI run should swallow.
+
+Which is also why a warning exits `3`, and why `3` outranks even a `CRITICAL`. Codes `0`, `1` and `2` are verdicts: each says *I checked everything, and the worst of it was this*. A run that could not read one of your configs, or whose rule crashed, cannot honestly say that at any severity — and the dangerous version of the lie is `0`, where a build passes green not because your config is safe but because nobody ever looked at it. `3` says the one thing that is true: **the result is unknown, go and look.** Nothing is hidden behind it — every finding the scan did manage to make is still reported in full.
 
 ### What it detects
 

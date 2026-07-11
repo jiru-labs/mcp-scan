@@ -27,6 +27,12 @@ CONFIG_OPTION = typer.Option(
     "--config",
     "-c",
     help="Read this config file instead of discovering the installed hosts.",
+    # Click checks a path for readability before the command ever runs, and
+    # fails with a usage error when the check fails. That is the wrong answer
+    # for a config we lack permission to open: it is not a mistake in how the
+    # user invoked us, it is a config we could not scan, and we report it as
+    # the warning it is. The parser opens the file and handles the refusal.
+    readable=False,
 )
 
 QUIET_OPTION = typer.Option(
@@ -54,6 +60,21 @@ EXIT_CODES = {
 }
 
 EXIT_CLEAN = 0
+
+#: The scan did not complete: a config could not be read, or a rule crashed.
+#:
+#: Distinct from the codes above, and it outranks every one of them. They are
+#: verdicts — each says "I checked everything, and the worst of it was X" — and
+#: a run that failed to look at part of the config cannot honestly say that, at
+#: any severity. 0 would be the dangerous version of the lie (a build passes
+#: green over a config nobody read), but 1 and 2 are the same claim of complete
+#: coverage, and are just as untrue.
+#:
+#: So this code says the one thing that is true: the verdict is unknown, go and
+#: look. Nothing is hidden by it — every finding the scan did manage to make is
+#: still reported in full — but the single integer says "I don't know" rather
+#: than overstating what the run actually managed to check.
+EXIT_INCOMPLETE = 3
 
 
 @app.callback()
@@ -102,7 +123,9 @@ def scan(
 
     Exits 0 when nothing worse than an INFO finding is reported, 1 when the
     worst is a WARN, and 2 when a CRITICAL is found — so a script can gate on
-    the verdict without reading the output. With --quiet, the summary line is
+    the verdict without reading the output. A scan that could not complete,
+    because a config would not parse or a rule crashed, exits 3 rather than
+    passing off a partial look as a verdict. With --quiet, the summary line is
     all it prints, and the exit code carries the rest.
     """
     locations, servers, warnings = _read_servers(config)
@@ -127,7 +150,15 @@ def scan(
         # Nothing was scanned, and no warning has already explained why.
         console.print(f"[yellow]{_nothing_to_report(locations)}[/yellow]")
 
-    raise typer.Exit(_exit_code(result.findings))
+    if warnings:
+        # Said out loud, because the summary line above it cannot say it. That
+        # line counts what the rules found, and a scan that skipped half the
+        # config still reports "no findings" — true of what it read, and
+        # worthless as a verdict. This is the sentence that stops a user reading
+        # green where there is only silence.
+        console.print(_incomplete(warnings))
+
+    raise typer.Exit(_exit_code(result.findings, warnings))
 
 
 def _read_servers(
@@ -182,16 +213,31 @@ def _count(total: int, noun: str) -> str:
     return f"{total} {noun}" if total == 1 else f"{total} {noun}s"
 
 
-def _exit_code(findings: list[Finding]) -> int:
+def _exit_code(findings: list[Finding], warnings: list[str]) -> int:
     """What the run returns to the shell: the worst thing it found.
+
+    A warning outranks every finding, because it is not a statement about the
+    config — it is a statement about the scan, and it says the scan is not
+    trustworthy. See `EXIT_INCOMPLETE`.
 
     A clean scan and a scan that found nothing to scan both return 0. They are
     different results, and the output says which — but neither is a risk, and
     an exit code is not the place to argue about it.
     """
+    if warnings:
+        return EXIT_INCOMPLETE
     if not findings:
         return EXIT_CLEAN
     return EXIT_CODES[max(finding.severity for finding in findings)]
+
+
+def _incomplete(warnings: list[str]) -> Text:
+    """The line that says the run above it is not a verdict."""
+    return Text(
+        f"Scan incomplete: {_count(len(warnings), 'warning')} above. "
+        f"Part of your configuration was not checked.",
+        style="yellow",
+    )
 
 
 def _summary(findings: list[Finding], servers: list[MCPServer]) -> Text:
