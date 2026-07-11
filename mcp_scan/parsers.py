@@ -1,9 +1,15 @@
 """Parse MCP host config files into a common server model.
 
-All supported hosts (Claude Desktop, Claude Code, Cursor) declare their
-servers under a top-level `mcpServers` object, so a single parser covers
-them. A server is either local (`command` + `args`, stdio transport) or
-remote (`url`).
+Most supported hosts (Claude Desktop, Claude Code, Cursor, Windsurf) declare
+their servers under a top-level `mcpServers` object, so a single parser
+covers them. A server is either local (`command` + `args`, stdio transport)
+or remote (`url`).
+
+VS Code is the odd one out: it uses `servers` instead of `mcpServers` at the
+top level. Silently missing that would be worse than not discovering VS
+Code's config at all — the scan would read the file, find nothing under the
+key it knows, and report a false "0 servers, clean" — so the key checked is
+picked by `host`, not tried generically.
 
 Claude Code adds one twist: servers added with `--scope local` live inside the
 same `~/.claude.json`, nested under `projects["<path>"].mcpServers` rather than
@@ -23,9 +29,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mcp_scan.credentials import is_env_reference, redact_args, redact_url
-from mcp_scan.discovery import HOST_UNKNOWN
+from mcp_scan.discovery import HOST_UNKNOWN, HOST_VSCODE
 
 SERVERS_KEY = "mcpServers"
+#: VS Code's spelling of the same concept — see the module docstring.
+VSCODE_SERVERS_KEY = "servers"
 
 #: Claude Code's local scope. Servers added with `claude mcp add --scope local`
 #: are stored in `~/.claude.json` under `projects["<path>"].mcpServers`, not at
@@ -145,14 +153,15 @@ def parse_config_file(path: Path, host: str = HOST_UNKNOWN) -> ParseResult:
         result.warnings.append(f"{path}: expected a JSON object at the top level")
         return result
 
-    servers = data.get(SERVERS_KEY)
+    servers_key = VSCODE_SERVERS_KEY if host == HOST_VSCODE else SERVERS_KEY
+    servers = data.get(servers_key)
     if servers is not None:
         if isinstance(servers, dict):
             _add_servers(servers, path, host, result)
         else:
             # A config with no top-level servers at all is valid and silent; one
-            # whose `mcpServers` is the wrong type is a mistake worth flagging.
-            result.warnings.append(f"{path}: '{SERVERS_KEY}' is not a JSON object")
+            # whose servers key is the wrong type is a mistake worth flagging.
+            result.warnings.append(f"{path}: '{servers_key}' is not a JSON object")
 
     _add_local_scope_servers(data, path, host, result)
 

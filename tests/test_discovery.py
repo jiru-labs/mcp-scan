@@ -15,12 +15,22 @@ from mcp_scan.discovery import (
     HOST_CLAUDE_CODE,
     HOST_CLAUDE_DESKTOP,
     HOST_CURSOR,
+    HOST_VSCODE,
+    HOST_WINDSURF,
+    VSCODE_CONFIG_RELPATH,
+    VSCODE_CONFIG_RELPATH_LINUX,
+    VSCODE_CONFIG_RELPATH_WINDOWS,
+    VSCODE_PROJECT_CONFIG_RELPATH,
+    WINDSURF_CONFIG_RELPATH,
     ConfigLocation,
     claude_desktop_config_path,
     find_all_configs,
     find_claude_code_configs,
     find_claude_desktop_config,
     find_cursor_configs,
+    find_vscode_configs,
+    find_windsurf_config,
+    vscode_config_path,
 )
 
 
@@ -193,6 +203,108 @@ def test_missing_cursor_configs_do_not_raise(tmp_path: Path) -> None:
     assert project_config.exists is False
 
 
+def test_vscode_defaults_to_real_home_when_no_home_given() -> None:
+    user_config, _ = find_vscode_configs()
+
+    # No OS asserted here: this checks that a missing `home` falls back to the
+    # real `Path.home()`, on whatever platform is actually running the test.
+    assert user_config.path == vscode_config_path()
+    assert isinstance(user_config.exists, bool)
+
+
+def test_finds_the_vscode_user_config(tmp_path: Path) -> None:
+    expected = _write_config(tmp_path / VSCODE_CONFIG_RELPATH)
+
+    user_config, _ = find_vscode_configs(
+        home=tmp_path, project_dir=tmp_path / "elsewhere", platform="darwin"
+    )
+
+    assert user_config.host == HOST_VSCODE
+    assert user_config.path == expected
+    assert user_config.exists is True
+
+
+def test_finds_the_vscode_user_config_on_linux(tmp_path: Path) -> None:
+    expected = _write_config(tmp_path / VSCODE_CONFIG_RELPATH_LINUX)
+
+    user_config, _ = find_vscode_configs(
+        home=tmp_path, project_dir=tmp_path / "elsewhere", platform="linux"
+    )
+
+    assert user_config.path == expected
+    assert user_config.exists is True
+
+
+def test_finds_the_vscode_user_config_on_windows_with_appdata(tmp_path: Path) -> None:
+    appdata = tmp_path / "AppData" / "Roaming"
+    expected = _write_config(appdata / VSCODE_CONFIG_RELPATH_WINDOWS)
+
+    user_config, _ = find_vscode_configs(
+        home=tmp_path,
+        project_dir=tmp_path / "elsewhere",
+        platform="win32",
+        appdata=str(appdata),
+    )
+
+    assert user_config.path == expected
+    assert user_config.exists is True
+
+
+def test_finds_the_project_vscode_config(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    expected = _write_config(project / VSCODE_PROJECT_CONFIG_RELPATH)
+
+    _, project_config = find_vscode_configs(
+        home=tmp_path / "home", project_dir=project, platform="linux"
+    )
+
+    assert project_config.host == HOST_VSCODE
+    assert project_config.path == expected
+    assert project_config.exists is True
+
+
+def test_project_vscode_config_defaults_to_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    expected = _write_config(tmp_path / VSCODE_PROJECT_CONFIG_RELPATH)
+
+    _, project_config = find_vscode_configs(
+        home=tmp_path / "home", platform="linux"
+    )
+
+    assert project_config.path == expected
+    assert project_config.exists is True
+
+
+def test_missing_vscode_configs_do_not_raise(tmp_path: Path) -> None:
+    user_config, project_config = find_vscode_configs(
+        home=tmp_path / "home", project_dir=tmp_path / "project", platform="linux"
+    )
+
+    assert user_config.host == HOST_VSCODE
+    assert user_config.exists is False
+    assert project_config.exists is False
+
+
+def test_finds_existing_windsurf_config(tmp_path: Path) -> None:
+    expected = _write_config(tmp_path / WINDSURF_CONFIG_RELPATH)
+
+    location = find_windsurf_config(home=tmp_path)
+
+    assert location.host == HOST_WINDSURF
+    assert location.path == expected
+    assert location.exists is True
+
+
+def test_missing_windsurf_config_does_not_raise(tmp_path: Path) -> None:
+    location = find_windsurf_config(home=tmp_path)
+
+    assert location.host == HOST_WINDSURF
+    assert location.exists is False
+    assert location.path == tmp_path / WINDSURF_CONFIG_RELPATH
+
+
 def test_find_all_configs_covers_every_host(installed_hosts: InstalledHosts) -> None:
     locations = find_all_configs(
         home=installed_hosts.home, project_dir=installed_hosts.project_dir
@@ -204,6 +316,9 @@ def test_find_all_configs_covers_every_host(installed_hosts: InstalledHosts) -> 
         HOST_CLAUDE_CODE,  # project scope
         HOST_CURSOR,  # global
         HOST_CURSOR,  # project
+        HOST_VSCODE,  # user scope
+        HOST_VSCODE,  # project scope
+        HOST_WINDSURF,
     ]
     assert all(location.exists for location in locations)
 
@@ -216,7 +331,7 @@ def test_find_all_configs_reports_uninstalled_hosts(tmp_path: Path) -> None:
         home=tmp_path / "home", project_dir=tmp_path / "project"
     )
 
-    assert len(locations) == 5
+    assert len(locations) == 8
     assert not any(location.exists for location in locations)
     assert all(isinstance(location, ConfigLocation) for location in locations)
 

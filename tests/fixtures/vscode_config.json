@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "vscode-search": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@example/vscode-mcp"],
+      "env": {
+        "SEARCH_API_KEY": "sk-FAKEfixtureVSCODEuserKeyDoNotUse"
+      }
+    }
+  }
+}
