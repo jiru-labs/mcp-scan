@@ -11,8 +11,8 @@ import pytest
 from mcp_scan.discovery import (
     CLAUDE_CODE_CONFIG_RELPATH,
     CLAUDE_CODE_PROJECT_CONFIG_FILENAME,
-    CLAUDE_DESKTOP_CONFIG_RELPATH,
     CURSOR_CONFIG_RELPATH,
+    claude_desktop_config_path,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -109,7 +109,9 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
     project_dir = tmp_path / "project"
 
     sources = {
-        home / CLAUDE_DESKTOP_CONFIG_RELPATH: "sample_config.json",
+        # Wherever discovery would actually look on the platform running the
+        # tests, so this fixture stays correct on macOS, Linux and Windows.
+        claude_desktop_config_path(home): "sample_config.json",
         # Carries a local-scope server nested under `projects[...]`, too.
         home / CLAUDE_CODE_CONFIG_RELPATH: "claude_code_config.json",
         project_dir
