@@ -9,6 +9,7 @@ from mcp_scan.rules import Severity, run_rules
 from mcp_scan.rules.static_credentials import (
     StaticCredentialInArgs,
     StaticCredentialInEnv,
+    StaticCredentialInUrl,
 )
 
 # A GitHub token, an OpenAI-style key and a JWT, in the shape the real ones come
@@ -187,10 +188,62 @@ class TestStaticCredentialInArgs:
         assert StaticCredentialInArgs().check(_server()) == []
 
 
+class TestStaticCredentialInUrl:
+    """CRITICAL: a credential written into a remote server's URL."""
+
+    def _remote(self, url: str) -> MCPServer:
+        return MCPServer(
+            name="notes",
+            source=Path("/home/demo/.cursor/mcp.json"),
+            host="cursor",
+            url=url,
+        )
+
+    def test_flags_a_credential_in_a_query_parameter(self) -> None:
+        server = self._remote(f"https://mcp.example.com/sse?api_key={FAKE_API_KEY}")
+
+        findings = StaticCredentialInUrl().check(server)
+
+        assert len(findings) == 1
+        assert findings[0].severity is Severity.CRITICAL
+        assert findings[0].rule_id == "static-credential-in-url"
+        # Which parameter to go and fix — never what is in it.
+        assert "api_key" in findings[0].message
+        assert FAKE_API_KEY not in findings[0].message
+
+    def test_flags_a_password_in_the_authority(self) -> None:
+        server = self._remote(f"https://demo:{FAKE_API_KEY}@mcp.example.com/mcp")
+
+        findings = StaticCredentialInUrl().check(server)
+
+        assert len(findings) == 1
+        assert FAKE_API_KEY not in findings[0].message
+
+    def test_flags_each_credential_a_url_carries(self) -> None:
+        server = self._remote(
+            f"https://demo:{FAKE_API_KEY}@mcp.example.com/sse?token={FAKE_GITHUB_TOKEN}"
+        )
+
+        assert len(StaticCredentialInUrl().check(server)) == 2
+
+    def test_ignores_a_url_whose_credential_comes_from_the_environment(self) -> None:
+        server = self._remote("https://mcp.example.com/sse?api_key=${API_KEY}")
+
+        assert StaticCredentialInUrl().check(server) == []
+
+    def test_ignores_an_ordinary_url(self) -> None:
+        server = self._remote("https://mcp.example.com/sse?region=eu&version=2")
+
+        assert StaticCredentialInUrl().check(server) == []
+
+    def test_a_local_server_has_no_url_to_flag(self) -> None:
+        assert StaticCredentialInUrl().check(_server()) == []
+
+
 class TestOnARealConfig:
     """The rules, on a config file, through the parser that feeds them."""
 
-    def test_reports_both_credentials_and_leaves_the_clean_server_alone(
+    def test_reports_every_credential_and_leaves_the_clean_servers_alone(
         self, credentials_config: Path
     ) -> None:
         servers = parse_config_file(credentials_config).servers
@@ -198,8 +251,9 @@ class TestOnARealConfig:
         result = run_rules(servers)
 
         assert [(f.rule_id, f.server.name) for f in result.findings] == [
-            # Worst first: the command line before the config file.
+            # Worst first: what leaves the config file, before what stays in it.
             ("static-credential-in-args", "args-inline"),
+            ("static-credential-in-url", "url-inline"),
             ("static-credential-in-env", "env-hardcoded"),
         ]
         assert result.warnings == []

@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mcp_scan.credentials import is_env_reference, redact_args
+from mcp_scan.credentials import is_env_reference, redact_args, redact_url
 from mcp_scan.discovery import HOST_UNKNOWN
 
 SERVERS_KEY = "mcpServers"
@@ -75,18 +75,16 @@ class MCPServer:
 
     @property
     def redacted_endpoint(self) -> str:
-        """The same endpoint, with any credential in its arguments masked.
+        """The same endpoint, with any credential in it masked.
 
-        What every report prints. The command line survives intact — the user
-        needs to recognise the server and find the argument to fix — and only
-        the secret is replaced: `npx server --api-key=***`.
-
-        A credential *inside a URL* is not masked yet: nothing detects one, and
-        masking what no rule can find would only hide it from the user too.
+        What every report prints. The endpoint survives intact — the user needs
+        to recognise the server, and to find the argument or the parameter to go
+        and fix — and only the secret is replaced: `npx server --api-key=***`,
+        `https://mcp.example.com/sse?api_key=***`.
         """
         if self.command:
             return " ".join((self.command, *redact_args(self.args)))
-        return self.url or ""
+        return redact_url(self.url) if self.url else ""
 
 
 @dataclass

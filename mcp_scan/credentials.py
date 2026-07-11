@@ -80,6 +80,14 @@ EMBEDDED_CREDENTIALS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bbearer\s+[A-Za-z0-9._~+/-]{12,}", re.IGNORECASE), "a bearer token"),
 )
 
+#: The `user:password@` a URL can carry in front of its host.
+URL_PASSWORD = re.compile(r"://[^/?#@:]*:(?P<value>[^/?#@]*)@")
+
+#: One `name=value` of a query string, matched on the URL as *written* — what
+#: gets masked is then the exact text that would otherwise have been printed,
+#: percent-encoding and all.
+URL_QUERY_FIELD = re.compile(r"[?&](?P<name>[^=&#]+)=(?P<value>[^&#]*)")
+
 
 @dataclass(frozen=True)
 class Credential:
@@ -124,6 +132,91 @@ def redact_args(args: Sequence[str]) -> tuple[str, ...]:
         credential.redacted if credential is not None else arg
         for arg, credential in zip(args, credentials_in(args))
     )
+
+
+def credentials_in_url(url: str) -> list[str]:
+    """Name every credential a remote server's URL carries.
+
+    A URL is one string rather than a list of arguments, so what comes back is
+    a list of labels rather than one answer per part — but it is the same walk
+    that `redact_url` masks from, and so the same guarantee: what can be named
+    can be hidden.
+    """
+    return [label for label, _, _ in _secrets_in_url(url)]
+
+
+def redact_url(url: str) -> str:
+    """The same URL, with every credential in it masked where it sits.
+
+    The URL is what tells the user which server this is, so only the value goes:
+    `https://mcp.example.com/sse?api_key=***`.
+    """
+    redacted = url
+    # Right to left, so that masking one span cannot move the one before it.
+    for _, start, end in reversed(_secrets_in_url(url)):
+        redacted = f"{redacted[:start]}{REDACTED}{redacted[end:]}"
+    return redacted
+
+
+def _secrets_in_url(url: str) -> list[tuple[str, int, int]]:
+    """Every credential a URL carries: what to call it, and where its value sits.
+
+    Positions, not values — masking by *offset* rather than by search-and-replace
+    is what keeps `?api_key=x` from blanking every `x` in the hostname too.
+
+    The URL is read as written, undecoded. A percent-encoded secret is masked as
+    the text it is, which is the text that would have been printed.
+    """
+    spans: list[tuple[str, int, int]] = []
+
+    password = URL_PASSWORD.search(url)
+    if password is not None and _holds_a_secret(password["value"]):
+        # The user half is not named, unlike the flag an argument hangs off: a
+        # URL that carries a token *as* its username would have us quote it.
+        spans.append(("a password", *password.span("value")))
+
+    for field in URL_QUERY_FIELD.finditer(url):
+        if not _holds_a_secret(field["value"]):
+            continue
+        # The parameter's name first, as a flag's name comes first in an
+        # argument: it is what tells the user which one to go and fix. The shape
+        # of the value only has to speak when the name says nothing.
+        label = (
+            f"the value of '{field['name']}'"
+            if names_a_secret(field["name"])
+            else _shape_of(field["value"])
+        )
+        if label is not None:
+            spans.append((label, *field.span("value")))
+
+    # A token gives itself away wherever it sits — a path segment, a fragment, a
+    # query field whose name said nothing.
+    for pattern, label in CREDENTIAL_SHAPES:
+        spans.extend((label, *match.span()) for match in pattern.finditer(url))
+
+    return _without_overlaps(spans)
+
+
+def _shape_of(value: str) -> str | None:
+    """Name the kind of token a value is, if its shape gives it away."""
+    for pattern, label in CREDENTIAL_SHAPES:
+        if pattern.fullmatch(value.strip()):
+            return label
+    return None
+
+
+def _without_overlaps(spans: list[tuple[str, int, int]]) -> list[tuple[str, int, int]]:
+    """The same spans, in order, with anything already covered dropped.
+
+    One secret is routinely found twice — a query value that is *also* a token
+    by its shape — and would otherwise be reported twice and masked twice. The
+    widest span wins, so the label kept is the one that saw the most.
+    """
+    kept: list[tuple[str, int, int]] = []
+    for label, start, end in sorted(spans, key=lambda span: (span[1], -span[2])):
+        if not kept or start >= kept[-1][2]:
+            kept.append((label, start, end))
+    return kept
 
 
 def names_a_secret(name: str) -> bool:

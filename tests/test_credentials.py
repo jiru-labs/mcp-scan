@@ -2,7 +2,14 @@
 
 import pytest
 
-from mcp_scan.credentials import REDACTED, credentials_in, names_a_secret, redact_args
+from mcp_scan.credentials import (
+    REDACTED,
+    credentials_in,
+    credentials_in_url,
+    names_a_secret,
+    redact_args,
+    redact_url,
+)
 
 # A GitHub token, an OpenAI-style key and a JWT, in the shape the real ones come
 # in. None is a live credential; all of them must stay out of every rendering.
@@ -139,6 +146,99 @@ class TestRedactArgs:
         assert redact_args(()) == ()
 
 
+class TestUrlCredentials:
+    """A remote server has no arguments — its whole endpoint is one URL."""
+
+    def test_names_and_masks_a_credential_in_a_query_parameter(self) -> None:
+        url = f"https://mcp.example.com/sse?api_key={FAKE_API_KEY}"
+
+        assert credentials_in_url(url) == ["the value of 'api_key'"]
+        assert redact_url(url) == "https://mcp.example.com/sse?api_key=***"
+
+    def test_masks_only_the_credentialed_parameter(self) -> None:
+        """The rest of the query is what tells the user which server this is."""
+        url = f"https://mcp.example.com/sse?region=eu&token={FAKE_GITHUB_TOKEN}&v=2"
+
+        assert redact_url(url) == "https://mcp.example.com/sse?region=eu&token=***&v=2"
+
+    def test_names_and_masks_a_password_in_the_authority(self) -> None:
+        url = f"https://demo:{FAKE_API_KEY}@mcp.example.com/mcp"
+
+        assert credentials_in_url(url) == ["a password"]
+        assert redact_url(url) == "https://demo:***@mcp.example.com/mcp"
+
+    def test_names_a_password_without_quoting_the_user_it_belongs_to(self) -> None:
+        """A URL can carry the token *as* the username. Naming it would echo it."""
+        url = f"https://{FAKE_GITHUB_TOKEN}:x-oauth-basic@mcp.example.com/mcp"
+
+        assert FAKE_GITHUB_TOKEN not in " ".join(credentials_in_url(url))
+        assert FAKE_GITHUB_TOKEN not in redact_url(url)
+
+    def test_masks_a_token_that_gives_itself_away_by_its_shape(self) -> None:
+        """No parameter name says it is a secret. The token says so itself."""
+        url = f"https://mcp.example.com/sse?t={FAKE_JWT}"
+
+        assert credentials_in_url(url) == ["a JWT"]
+        assert redact_url(url) == "https://mcp.example.com/sse?t=***"
+
+    def test_masks_a_token_sitting_in_the_path(self) -> None:
+        url = f"https://mcp.example.com/{FAKE_GITHUB_TOKEN}/sse"
+
+        assert credentials_in_url(url) == ["a GitHub token"]
+        assert redact_url(url) == "https://mcp.example.com/***/sse"
+
+    def test_reports_one_credential_found_two_ways_only_once(self) -> None:
+        """A named parameter that is *also* a token by shape is one secret."""
+        url = f"https://mcp.example.com/sse?api_key={FAKE_API_KEY}"
+
+        assert len(credentials_in_url(url)) == 1
+        assert redact_url(url).count(REDACTED) == 1
+
+    def test_names_and_masks_every_credential_a_url_carries(self) -> None:
+        url = (
+            f"https://demo:{FAKE_API_KEY}@mcp.example.com/sse"
+            f"?token={FAKE_GITHUB_TOKEN}&region=eu"
+        )
+
+        assert credentials_in_url(url) == ["a password", "the value of 'token'"]
+        assert redact_url(url) == "https://demo:***@mcp.example.com/sse?token=***&region=eu"
+
+    def test_leaves_a_parameter_read_from_the_environment_alone(self) -> None:
+        url = "https://mcp.example.com/sse?api_key=${EXAMPLE_API_KEY}"
+
+        assert credentials_in_url(url) == []
+        assert redact_url(url) == url
+
+    def test_leaves_an_ordinary_url_alone(self) -> None:
+        url = "https://mcp.example.com/sse?region=eu&version=2#section"
+
+        assert credentials_in_url(url) == []
+        assert redact_url(url) == url
+
+    def test_masks_by_position_not_by_search_and_replace(self) -> None:
+        """A one-character secret must not blank every `x` in the hostname.
+
+        Masking by searching for the value would rewrite the URL wherever the
+        value happened to occur — and the shorter the secret, the more of the
+        URL it would take with it.
+        """
+        url = "https://x.example.com/x?api_key=x&box=x"
+
+        assert redact_url(url) == "https://x.example.com/x?api_key=***&box=x"
+
+    def test_no_secret_survives_redaction(self) -> None:
+        url = (
+            f"https://demo:{FAKE_API_KEY}@mcp.example.com/{FAKE_GITHUB_TOKEN}/sse"
+            f"?token={FAKE_JWT}"
+        )
+
+        redacted = redact_url(url)
+
+        for secret in (FAKE_API_KEY, FAKE_GITHUB_TOKEN, FAKE_JWT):
+            assert secret not in redacted
+            assert secret not in " ".join(credentials_in_url(url))
+
+
 class TestDetectionAndRedactionAgree:
     """The invariant the module exists for.
 
@@ -170,3 +270,16 @@ class TestDetectionAndRedactionAgree:
         ]
 
         assert flagged == masked
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"https://mcp.example.com/sse?api_key={FAKE_API_KEY}",
+            f"https://demo:{FAKE_API_KEY}@mcp.example.com/mcp",
+            f"https://mcp.example.com/{FAKE_GITHUB_TOKEN}/sse",
+            "https://mcp.example.com/sse?api_key=${API_KEY}",
+            "https://mcp.example.com/sse?region=eu",
+        ],
+    )
+    def test_a_url_is_masked_exactly_when_it_is_flagged(self, url: str) -> None:
+        assert bool(credentials_in_url(url)) == (redact_url(url) != url)

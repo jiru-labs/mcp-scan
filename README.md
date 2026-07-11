@@ -32,7 +32,7 @@ These are the files it looks for:
 
 A host you don't have installed is simply skipped, not an error.
 
-No credential is ever printed. Environment variables are listed by name only — `mcp-scan` never reads, prints or stores their values — and a credential passed inline on a command line is masked where the command is shown: `npx server --api-key=***`. A value referenced from the environment, `--api-key=${API_KEY}`, is left readable: it is the fix, not the leak.
+No credential is ever printed. Environment variables are listed by name only — `mcp-scan` never reads, prints or stores their values — and a credential written into a command line or a URL is masked where the endpoint is shown: `npx server --api-key=***`, `https://mcp.example.com/sse?api_key=***`. A value referenced from the environment, `--api-key=${API_KEY}`, is left readable: it is the fix, not the leak.
 
 To inspect one config file instead of discovering the installed hosts:
 
@@ -72,6 +72,7 @@ mcp-scan scan --quiet || echo "MCP config needs attention"
 | Rule | Severity | What it flags |
 | --- | --- | --- |
 | `static-credential-in-args` | CRITICAL | A credential passed inline on a server's command line — `--api-key=sk-…`, `GITHUB_TOKEN=ghp_…`, `Authorization: Bearer …`. On top of sitting in the config file, it is visible in the process table to every other process running as you. |
+| `static-credential-in-url` | CRITICAL | A credential in a remote server's URL — `?api_key=sk-…`, or the `user:password@` before the host. On top of sitting in the config file, it travels: out in the request line, into the access log at the far end, and into wherever the URL gets pasted. |
 | `static-credential-in-env` | WARN | A credential hardcoded as the value of an `env` entry, e.g. `"GITHUB_TOKEN": "ghp_…"`. |
 
 The fix for both is to keep the value in your environment (or a secret manager) and have the config reference it — `"GITHUB_TOKEN": "${GITHUB_TOKEN}"`. A config that already does is not flagged.

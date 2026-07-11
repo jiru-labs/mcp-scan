@@ -1,6 +1,7 @@
 """Shared fixtures for the test suite."""
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,12 +126,20 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
     return InstalledHosts(home=home, project_dir=project_dir, secrets=secrets)
 
 
+#: A query parameter of a fixture URL whose value is a credential. Spelled out
+#: here rather than imported from `mcp_scan.credentials`, so that a hole in the
+#: scanner's own idea of what a secret looks like cannot quietly blind the test
+#: that checks it never prints one.
+SECRET_QUERY_PARAM = re.compile(r"[?&](?:[^=&]*_)?(?:key|token|secret|password)=([^&]+)")
+
+
 def _config_secrets(config: Path) -> list[str]:
     """Every credential value a config declares, wherever it hides.
 
-    That is every `env` value, plus the value half of any `--flag=value`
-    argument — the two places a config can pin a secret, and the two a report
-    must never echo.
+    That is every `env` value, the value half of any `--flag=value` argument,
+    and any credential-bearing query parameter of a remote server's URL — the
+    three places a config can pin a secret, and the three a report must never
+    echo.
     """
     data = json.loads(config.read_text(encoding="utf-8"))
 
@@ -141,7 +150,14 @@ def _config_secrets(config: Path) -> list[str]:
             _, separator, value = str(arg).partition("=")
             if separator:
                 secrets.append(value)
+        secrets.extend(SECRET_QUERY_PARAM.findall(str(server.get("url", ""))))
 
-    # An empty value is a substring of every output there is; asserting it never
-    # appears would fail on principle.
-    return [secret for secret in secrets if secret]
+    # A `$…` value references the environment and pins nothing: it is the fix,
+    # not the leak, and it is meant to be printed. An empty value is a substring
+    # of every output there is; asserting it never appears would fail on
+    # principle.
+    return [
+        secret
+        for secret in secrets
+        if secret and not secret.strip().startswith("$")
+    ]
