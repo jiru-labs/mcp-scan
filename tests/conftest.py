@@ -30,14 +30,62 @@ def malformed_config() -> Path:
 
 
 @pytest.fixture
+def markup_config() -> Path:
+    """A config whose server name and args read as Rich console markup.
+
+    Names come from the config, so they are attacker-controlled: rendering one
+    as markup would mangle the report or crash the command.
+    """
+    return FIXTURES_DIR / "markup_config.json"
+
+
+@pytest.fixture
+def credentials_config() -> Path:
+    """A config with a credential in `env`, one inline in `args`, and neither.
+
+    The three cases the static-credential rules have to tell apart, in the shape
+    a real host config would carry them.
+    """
+    return FIXTURES_DIR / "credentials_config.json"
+
+
+@pytest.fixture
+def suspicious_config() -> Path:
+    """A config with one server per suspicious-pattern heuristic, plus a clean one.
+
+    The clean server is the point of the fixture as much as the other four: it
+    uses a package runner, a scoped and pinned package and an HTTPS URL, and no
+    heuristic may fire on it.
+    """
+    return FIXTURES_DIR / "suspicious_config.json"
+
+
+@pytest.fixture
+def broad_access_config() -> Path:
+    """A config with servers handed a root, a home, a whole disk and a shell.
+
+    The last server is the counterweight: it uses the same filesystem server as
+    the first two, scoped to a single project directory, and nothing may fire
+    on it.
+    """
+    return FIXTURES_DIR / "broad_access_config.json"
+
+
+@pytest.fixture
 def sample_secrets(sample_config: Path) -> list[str]:
-    """Every env var value in the sample config.
+    """Every credential value in the sample config.
 
     Read straight from the fixture so the guarantee still holds if the fixture
     changes: none of these strings may ever reach a parse result or the
     terminal.
     """
-    return _env_values(sample_config)
+    return _config_secrets(sample_config)
+
+
+@pytest.fixture
+def credentials_secrets(credentials_config: Path) -> list[str]:
+    """Every credential value in the credentials config, in `env` and in `args`."""
+    return _config_secrets(credentials_config)
 
 
 @dataclass(frozen=True)
@@ -72,16 +120,28 @@ def installed_hosts(tmp_path: Path) -> InstalledHosts:
         fixture = FIXTURES_DIR / fixture_name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(fixture, destination)
-        secrets.extend(_env_values(fixture))
+        secrets.extend(_config_secrets(fixture))
 
     return InstalledHosts(home=home, project_dir=project_dir, secrets=secrets)
 
 
-def _env_values(config: Path) -> list[str]:
-    """Every env var value declared in a config file."""
+def _config_secrets(config: Path) -> list[str]:
+    """Every credential value a config declares, wherever it hides.
+
+    That is every `env` value, plus the value half of any `--flag=value`
+    argument — the two places a config can pin a secret, and the two a report
+    must never echo.
+    """
     data = json.loads(config.read_text(encoding="utf-8"))
-    return [
-        value
-        for server in data["mcpServers"].values()
-        for value in server.get("env", {}).values()
-    ]
+
+    secrets: list[str] = []
+    for server in data["mcpServers"].values():
+        secrets.extend(str(value) for value in server.get("env", {}).values())
+        for arg in server.get("args", []):
+            _, separator, value = str(arg).partition("=")
+            if separator:
+                secrets.append(value)
+
+    # An empty value is a substring of every output there is; asserting it never
+    # appears would fail on principle.
+    return [secret for secret in secrets if secret]

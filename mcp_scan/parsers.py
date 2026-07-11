@@ -14,6 +14,7 @@ exception.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,6 +26,10 @@ TRANSPORT_STDIO = "stdio"
 TRANSPORT_REMOTE = "remote"
 TRANSPORT_UNKNOWN = "unknown"
 
+#: A value that is nothing but a pointer at the real environment: `$TOKEN`,
+#: `${TOKEN}`, or the `${env:TOKEN}` form Cursor and VS Code use.
+ENV_REFERENCE = re.compile(r"\$\{[^{}]+\}|\$[A-Za-z_][A-Za-z0-9_]*")
+
 
 @dataclass(frozen=True)
 class MCPServer:
@@ -33,6 +38,12 @@ class MCPServer:
     `host` is the tool that owns the config the server was read from, and
     `source` the config file itself. `env_keys` holds the names of the declared
     environment variables, never their values.
+
+    `env_static_keys` names the subset of those whose value is written into the
+    config file itself, rather than referenced from the real environment — the
+    ones that put a secret on disk. Which name is in there is decided by
+    looking at the value once, at parse time; the value is then dropped like
+    every other one.
     """
 
     name: str
@@ -42,6 +53,7 @@ class MCPServer:
     args: tuple[str, ...] = ()
     url: str | None = None
     env_keys: tuple[str, ...] = ()
+    env_static_keys: tuple[str, ...] = ()
 
     @property
     def transport(self) -> str:
@@ -145,9 +157,14 @@ def _build_server(name: str, definition: dict, source: Path, host: str) -> MCPSe
         tuple(str(arg) for arg in raw_args) if isinstance(raw_args, list) else ()
     )
 
-    # Keys only. The values are credentials and are deliberately discarded.
+    # Keys only. The values are credentials and are deliberately discarded —
+    # all a value is asked, on its way out, is whether it is a secret at all.
     raw_env = definition.get("env")
-    env_keys = tuple(str(key) for key in raw_env) if isinstance(raw_env, dict) else ()
+    env = raw_env if isinstance(raw_env, dict) else {}
+    env_keys = tuple(str(key) for key in env)
+    env_static_keys = tuple(
+        str(key) for key, value in env.items() if _is_written_into_the_config(value)
+    )
 
     return MCPServer(
         name=name,
@@ -157,4 +174,32 @@ def _build_server(name: str, definition: dict, source: Path, host: str) -> MCPSe
         args=args,
         url=url,
         env_keys=env_keys,
+        env_static_keys=env_static_keys,
     )
+
+
+def is_env_reference(value: str) -> bool:
+    """True when a value only points at an environment variable, and holds none.
+
+    A config that says `"GITHUB_TOKEN": "${GITHUB_TOKEN}"` pins no secret to
+    disk: the host expands the reference from the environment it was launched
+    with. The credential rules treat such a value as the fix, not the problem.
+    """
+    return ENV_REFERENCE.fullmatch(value.strip()) is not None
+
+
+def _is_written_into_the_config(value: object) -> bool:
+    """True when an env entry pins a literal value into the config file.
+
+    An empty value declares the variable without setting it, and a reference
+    defers to the environment; both leave the config free of secrets. Anything
+    else is a value sitting on disk.
+
+    A template that only partly references the environment — `"Bearer ${TOKEN}"`
+    — counts as written down. It is rare, and erring towards a finding the user
+    can dismiss beats staying quiet about a secret.
+    """
+    if value is None:
+        return False
+    text = str(value).strip()
+    return bool(text) and not is_env_reference(text)

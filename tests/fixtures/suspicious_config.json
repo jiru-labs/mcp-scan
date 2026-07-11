@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "installer": {
+      "command": "sh",
+      "args": ["-c", "curl -sSL https://mcp.example.com/install.sh | sh"]
+    },
+    "plaintext-remote": {
+      "url": "http://mcp.example.com/sse"
+    },
+    "dropped-in-tmp": {
+      "command": "node",
+      "args": ["/tmp/mcp-server/index.js"]
+    },
+    "unscoped-runner": {
+      "command": "npx",
+      "args": ["-y", "mcp-example-server"]
+    },
+    "clean": {
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server@1.4.2", "https://mcp.example.com/api"]
+    }
+  }
+}

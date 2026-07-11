@@ -40,13 +40,33 @@ To inspect one config file instead of discovering the installed hosts:
 mcp-scan list --config path/to/claude_desktop_config.json
 ```
 
+Scan those same servers for security risks:
+
+```bash
+mcp-scan scan
+mcp-scan scan --config path/to/claude_desktop_config.json
+```
+
+Every detection rule runs against every server found, and the findings are reported worst-first, each naming the server, the host and the config file it came from. A rule that fails is reported as a warning; it never takes the scan down with it.
+
+### What it detects
+
+| Rule | Severity | What it flags |
+| --- | --- | --- |
+| `static-credential-in-args` | CRITICAL | A credential passed inline on a server's command line — `--api-key=sk-…`, `GITHUB_TOKEN=ghp_…`, `Authorization: Bearer …`. On top of sitting in the config file, it is visible in the process table to every other process running as you. |
+| `static-credential-in-env` | WARN | A credential hardcoded as the value of an `env` entry, e.g. `"GITHUB_TOKEN": "ghp_…"`. |
+
+The fix for both is to keep the value in your environment (or a secret manager) and have the config reference it — `"GITHUB_TOKEN": "${GITHUB_TOKEN}"`. A config that already does is not flagged.
+
+A finding tells you *where* the credential is — which variable, which argument — and never what it is. The value is not printed, stored or logged.
+
+More rules are landing — see the [open issues](https://github.com/jiru-labs/mcp-scan/issues). Adding one is adding a file: drop a `Rule` subclass into `mcp_scan/rules/`, give it an `id`, a `title` and a `severity` of `INFO`, `WARN` or `CRITICAL`, and the engine picks it up.
+
 Print the version:
 
 ```bash
 mcp-scan version
 ```
-
-The `scan` command is on the way — see the [open issues](https://github.com/jiru-labs/mcp-scan/issues).
 
 ## Development
 

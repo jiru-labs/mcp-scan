@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from conftest import InstalledHosts
 
 from mcp_scan.discovery import (
@@ -78,6 +79,61 @@ def test_records_env_var_keys_without_their_values(
     assert sample_secrets  # the fixture must actually carry secrets to test
     for secret in sample_secrets:
         assert secret not in parsed
+
+
+def test_records_which_env_vars_are_hardcoded_in_the_config(
+    credentials_config: Path,
+) -> None:
+    result = parse_config_file(credentials_config)
+    servers = {server.name: server for server in result.servers}
+
+    hardcoded = servers["env-hardcoded"]
+    assert hardcoded.env_keys == ("EXAMPLE_API_KEY",)
+    assert hardcoded.env_static_keys == ("EXAMPLE_API_KEY",)
+
+    # Declared under the same name, but the value lives in the environment.
+    referenced = servers["env-referenced"]
+    assert referenced.env_keys == ("EXAMPLE_API_KEY",)
+    assert referenced.env_static_keys == ()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "${GITHUB_TOKEN}",  # Claude Desktop, Claude Code
+        "${env:GITHUB_TOKEN}",  # Cursor, VS Code
+        "$GITHUB_TOKEN",  # a shell-style reference
+        "  ${GITHUB_TOKEN}  ",  # padded, but still just a reference
+        "",  # declared, never set
+        "   ",
+    ],
+)
+def test_an_env_var_that_pins_no_value_is_not_hardcoded(
+    tmp_path: Path, value: str
+) -> None:
+    path = _write_config(
+        tmp_path / "referenced.json",
+        {"mcpServers": {"gh": {"command": "npx", "env": {"GITHUB_TOKEN": value}}}},
+    )
+
+    server = parse_config_file(path).servers[0]
+
+    assert server.env_keys == ("GITHUB_TOKEN",)
+    assert server.env_static_keys == ()
+
+
+def test_an_env_var_with_a_value_of_an_unexpected_type_is_still_hardcoded(
+    tmp_path: Path,
+) -> None:
+    """A key pinned to a number is a key pinned in the file all the same."""
+    path = _write_config(
+        tmp_path / "odd_env.json",
+        {"mcpServers": {"gh": {"command": "npx", "env": {"API_KEY": 1234, "X": None}}}},
+    )
+
+    server = parse_config_file(path).servers[0]
+
+    assert server.env_static_keys == ("API_KEY",)
 
 
 def test_malformed_json_warns_instead_of_raising(malformed_config: Path) -> None:

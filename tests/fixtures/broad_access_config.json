@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "filesystem-root": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"]
+    },
+    "home-directory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "~"]
+    },
+    "docker-root-mount": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-v", "/:/host", "ghcr.io/example/mcp-server"]
+    },
+    "shell": {
+      "command": "uvx",
+      "args": ["mcp-shell-server"]
+    },
+    "scoped-to-a-project": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/demo/code/my-app"
+      ]
+    }
+  }
+}
