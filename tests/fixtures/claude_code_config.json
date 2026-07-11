@@ -1,0 +1,13 @@
+{
+  "numStartups": 42,
+  "autoUpdates": true,
+  "mcpServers": {
+    "linear": {
+      "command": "npx",
+      "args": ["-y", "@linear/mcp-server"],
+      "env": {
+        "LINEAR_API_KEY": "lin_api_FAKEfixtureKEYdoNotUse"
+      }
+    }
+  }
+}

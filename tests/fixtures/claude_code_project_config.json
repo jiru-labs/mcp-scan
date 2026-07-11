@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "project-db": {
+      "command": "uvx",
+      "args": ["mcp-server-postgres", "--readonly"],
+      "env": {
+        "DATABASE_URL": "postgresql://demo:FAKEfixturePASSWORD@localhost/demo"
+      }
+    }
+  }
+}
